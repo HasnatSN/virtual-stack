@@ -141,31 +141,31 @@ This checklist provides a step-by-step guide for implementing the VirtualStack b
 - [x] Create authentication dependency in `api/deps.py`
 - [x] Add login route and authentication endpoint
 - [x] Implement password verification
-- [ ] Add rate limiting for authentication endpoints
+- [x] Add rate limiting for authentication endpoints
 
 ### API Key Authentication
-- [ ] Create models and schemas for API Keys
-- [ ] Implement API Key generation and validation
-- [ ] Add API Key authentication dependency
+- [x] Create models and schemas for API Keys
+- [x] Implement API Key generation and validation
+- [x] Add API Key authentication dependency
 
 ### Authorization System
-- [ ] Implement permission checking utilities
-- [ ] Create tenant scoping middleware/dependency
-- [ ] Implement RBAC dependency function
-- [ ] Create custom permission decorators/dependencies
+- [x] Implement permission checking utilities
+- [x] Create tenant scoping middleware/dependency
+- [x] Implement RBAC dependency function
+- [x] Create custom permission decorators/dependencies
 
 ### IAM Service Layer
 - [x] Create user service for basic CRUD operations
 - [x] Implement tenant service
-- [ ] Add role and permission services
-- [ ] Create utilities for checking user permissions
+- [x] Add role and permission services
+- [x] Create utilities for checking user permissions
 
 ### IAM API Endpoints
 - [x] Implement login/logout endpoints
 - [x] Add user endpoints (CRUD)
 - [x] Create tenant endpoints (for platform admins)
-- [ ] Implement role management endpoints
-- [ ] Add API key management endpoints
+- [x] Implement role management endpoints
+- [x] Add API key management endpoints
 
 ## Phase 4: Multi-Tenancy Implementation (Week 4)
 

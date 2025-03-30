@@ -4,7 +4,7 @@ from enum import Enum
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from virtualstack.services.iam import user_service
+from virtualstack.services.iam import user_service, role_service, permission_service
 
 
 class Permission(str, Enum):
@@ -144,24 +144,26 @@ async def get_user_permissions(
     Returns:
         Set of permissions
     """
-    # This is a simplified implementation
-    # In a production system, we would:
-    # 1. Look up user's roles in the specified tenant (or global roles if no tenant)
-    # 2. Fetch all permissions for those roles
-    # 3. Return the union of all permissions
-    
-    # For now, return mock permissions based on hard-coded roles
-    # Assuming superuser has admin role, others have user role
+    # Get the user
     user = await user_service.get(db, id=user_id)
     
     if not user:
         return set()
     
+    # Superusers have all permissions
     if user.is_superuser:
-        return set(Permission)  # All permissions
+        return set(Permission)
     
-    # For now, return user role permissions
-    return ROLE_PERMISSIONS["user"]
+    # Get the user's roles for the specified tenant
+    roles = await role_service.get_user_roles(db, user_id=user_id, tenant_id=tenant_id)
+    
+    # Get permissions for each role and combine them
+    all_permissions = set()
+    for role in roles:
+        role_permissions = await role_service.get_role_permissions(db, role_id=role.id)
+        all_permissions.update([Permission(p.name) for p in role_permissions])
+    
+    return all_permissions
 
 
 def has_permission(
