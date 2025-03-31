@@ -26,6 +26,8 @@ class User(Base):
     
     # Relationships
     api_keys = relationship("APIKey", back_populates="user", cascade="all, delete-orphan")
+    sent_invitations = relationship("Invitation", back_populates="inviter", foreign_keys="Invitation.inviter_id")
+    received_invitations = relationship("Invitation", back_populates="user", foreign_keys="Invitation.user_id")
     
     def __repr__(self) -> str:
         return f"<User {self.email} ({self.id})>" 

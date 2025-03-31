@@ -23,6 +23,7 @@ class Tenant(Base):
     
     # Relationships
     api_keys = relationship("APIKey", back_populates="tenant", cascade="all, delete-orphan")
+    invitations = relationship("Invitation", back_populates="tenant", cascade="all, delete-orphan")
     
     def __repr__(self) -> str:
         return f"<Tenant {self.name} ({self.id})>" 

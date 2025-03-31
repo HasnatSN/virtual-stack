@@ -170,20 +170,20 @@ This checklist provides a step-by-step guide for implementing the VirtualStack b
 ## Phase 4: Multi-Tenancy Implementation (Week 4)
 
 ### Tenant Isolation
-- [ ] Implement tenant context retrieval in dependencies
-- [ ] Create tenant validation middleware
+- [x] Implement tenant context retrieval in dependencies
+- [x] Create tenant validation middleware
 - [ ] Set up tenant-specific database filtering
-- [ ] Add tenant ID to request context
+- [x] Add tenant ID to request context
 
 ### IAM Schema Migration - Second Part
-- [ ] Create migration for remaining IAM tables:
-  - [ ] iam.invitations
-  - [ ] iam.api_keys
+- [x] Create migration for remaining IAM tables:
+  - [x] iam.invitations
+  - [x] iam.api_keys
 
 ### IAM Models - Second Part
-- [ ] Implement Invitation model
-- [ ] Implement APIKey model
-- [ ] Add relationships to existing models
+- [x] Implement Invitation model
+- [x] Implement APIKey model
+- [x] Add relationships to existing models
 
 ### IAM Additional Endpoints
 - [ ] Create invitation endpoints
