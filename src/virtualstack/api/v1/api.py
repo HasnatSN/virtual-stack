@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from virtualstack.api.v1.endpoints import auth, users, tenants, api_keys, roles
+from virtualstack.api.v1.endpoints import auth, users, tenants, api_keys, roles, invitations
 
 api_router = APIRouter()
 
@@ -8,33 +8,40 @@ api_router = APIRouter()
 api_router.include_router(
     auth.router, 
     prefix="/auth", 
-    tags=["auth"]
+    tags=["Authentication"]
 )
 
 # Include user management endpoints
 api_router.include_router(
     users.router, 
     prefix="/users", 
-    tags=["users"]
+    tags=["Users"]
 )
 
 # Include tenant management endpoints
 api_router.include_router(
     tenants.router, 
     prefix="/tenants", 
-    tags=["tenants"]
+    tags=["Tenants"]
 )
 
 # Include API key management endpoints
 api_router.include_router(
     api_keys.router, 
     prefix="/api-keys", 
-    tags=["api-keys"]
+    tags=["API Keys"]
 )
 
 # Include role management endpoints
 api_router.include_router(
     roles.router, 
     prefix="/roles", 
-    tags=["roles"]
+    tags=["Roles"]
+)
+
+# Include invitation management endpoints
+api_router.include_router(
+    invitations.router, 
+    prefix="/invitations", 
+    tags=["Invitations"]
 )

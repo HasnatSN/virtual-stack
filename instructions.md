@@ -182,8 +182,11 @@ This checklist provides a step-by-step guide for implementing the VirtualStack b
 
 ### IAM Models - Second Part
 - [x] Implement Invitation model
-- [x] Implement APIKey model
-- [x] Add relationships to existing models
+- [x] Update Tenant model with additional fields
+- [x] Implement API Key model
+- [x] Update User model to track API key usage
+- [x] Implement Invitation service and endpoints
+- [ ] Implement tenant-user management
 
 ### IAM Additional Endpoints
 - [ ] Create invitation endpoints
