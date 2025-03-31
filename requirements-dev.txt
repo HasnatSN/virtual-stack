@@ -1,0 +1,7 @@
+# Development/Testing specific dependencies
+pytest
+pytest-asyncio
+pytest-cov # For coverage reporting
+httpx # Already used by test_functionality.py, good to have here
+alembic # For potential test DB migrations
+factory-boy # For generating test data 

@@ -1,57 +1,35 @@
-from typing import Generator, Any, Dict, Optional, List
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, AsyncEngine
+from typing import AsyncGenerator
+import os
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 
 from virtualstack.core.config import settings
 
-class MockSession:
-    """
-    Mock session for demonstration purposes.
-    This class mimics the behavior of AsyncSession but doesn't actually connect to a database.
-    """
-    async def execute(self, *args, **kwargs):
-        class MockResult:
-            def scalars(self):
-                return MockScalars()
-            
-            def scalar_one_or_none(self):
-                return None
-                
-            def first(self):
-                return None
-        
-        return MockResult()
-    
-    async def commit(self):
-        pass
-    
-    async def rollback(self):
-        pass
-    
-    async def close(self):
-        pass
-    
-    def __await__(self):
-        async def _await_impl():
-            return self
-        return _await_impl().__await__()
+# Determine which database URI to use
+# Use TEST_DATABASE_URI if RUN_ENV is 'test', otherwise use DATABASE_URI
+RUN_ENV = os.getenv("RUN_ENV", "development") # Default to development
+DATABASE_CONNECTION_URI = settings.TEST_DATABASE_URI if RUN_ENV == "test" else settings.DATABASE_URI
 
-class MockScalars:
-    def all(self):
-        return []
-    
-    def first(self):
-        return None
+if not DATABASE_CONNECTION_URI:
+    raise RuntimeError("Database URI not configured. Set DATABASE_URI or TEST_DATABASE_URI.")
 
-async def get_db() -> Generator:
+engine = create_async_engine(str(DATABASE_CONNECTION_URI), pool_pre_ping=True)
+
+#expire_on_commit=False is important for async sessions
+AsyncSessionFactory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """
-    Get database session.
-    
-    Note: For demonstration purposes, this returns a mock session
-    instead of connecting to a real database.
+    Dependency that provides an async database session.
     """
-    session = MockSession()
-    try:
-        yield session
-    finally:
-        await session.close()
+    async with AsyncSessionFactory() as session:
+        try:
+            yield session
+            # Optionally commit here if you want auto-commit behavior for endpoints
+            # await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()

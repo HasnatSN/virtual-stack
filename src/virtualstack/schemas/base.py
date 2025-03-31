@@ -24,6 +24,10 @@ class TimestampSchema(BaseSchema):
     updated_at: datetime = Field(..., description="Last update timestamp")
 
 
+# For backward compatibility with old schemas
+TimestampMixin = TimestampSchema
+
+
 class SoftDeleteSchema(BaseSchema):
     """Schema with soft delete field."""
     deleted_at: Optional[datetime] = Field(None, description="Deletion timestamp")

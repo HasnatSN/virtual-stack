@@ -37,37 +37,52 @@ class Settings(BaseSettings):
         raise ValueError(v)
 
     # Database settings
+    # Main DB
     DATABASE_URL: Optional[str] = None
-    POSTGRES_SERVER: str = "localhost"  # Default value for demo
-    POSTGRES_USER: str = "postgres"  # Default value for demo
-    POSTGRES_PASSWORD: str = "postgres"  # Default value for demo
-    POSTGRES_DB: str = "virtualstack"  # Default value for demo
+    POSTGRES_SERVER: str = "db"  # Changed default to match docker-compose service name
+    POSTGRES_USER: str = "postgres"
+    POSTGRES_PASSWORD: str = "postgres"
+    POSTGRES_DB: str = "virtualstack"
     POSTGRES_PORT: str = "5432"
     DATABASE_URI: Optional[PostgresDsn] = None
 
+    # Test DB
+    TEST_DATABASE_URL: Optional[str] = None
+    TEST_POSTGRES_SERVER: str = "localhost" # Default for local test runs without docker
+    TEST_POSTGRES_USER: str = "testuser"
+    TEST_POSTGRES_PASSWORD: str = "testpassword"
+    TEST_POSTGRES_DB: str = "virtualstack_test"
+    TEST_POSTGRES_PORT: str = "5433" # Default for local test runs without docker
+    TEST_DATABASE_URI: Optional[PostgresDsn] = None
+
     @field_validator("DATABASE_URI", mode="before")
-    def assemble_db_connection(cls, v: Optional[str], info: Dict[str, Any]) -> Any:
-        if v:
+    def assemble_db_connection(cls, v: Optional[str], values: Dict[str, Any]) -> Any:
+        if isinstance(v, str):
             return v
-            
-        # Try to use DATABASE_URL if provided
-        if info.data.get("DATABASE_URL"):
-            return info.data.get("DATABASE_URL")
-        
-        # Otherwise build from components
-        data = info.data
-        
         return PostgresDsn.build(
             scheme="postgresql+asyncpg",
-            username=data.get("POSTGRES_USER"),
-            password=data.get("POSTGRES_PASSWORD"),
-            host=data.get("POSTGRES_SERVER"),
-            port=int(data.get("POSTGRES_PORT", 5432)),
-            path=f"{data.get('POSTGRES_DB') or ''}",
+            username=values.data.get("POSTGRES_USER"),
+            password=values.data.get("POSTGRES_PASSWORD"),
+            host=values.data.get("POSTGRES_SERVER"),
+            port=int(values.data.get("POSTGRES_PORT")), # Use get() with default removed
+            path=f"{values.data.get('POSTGRES_DB')}"
+        )
+
+    @field_validator("TEST_DATABASE_URI", mode="before")
+    def assemble_test_db_connection(cls, v: Optional[str], values: Dict[str, Any]) -> Any:
+        if isinstance(v, str):
+            return v
+        return PostgresDsn.build(
+            scheme="postgresql+asyncpg",
+            username=values.data.get("TEST_POSTGRES_USER"),
+            password=values.data.get("TEST_POSTGRES_PASSWORD"),
+            host=values.data.get("TEST_POSTGRES_SERVER"),
+            port=int(values.data.get("TEST_POSTGRES_PORT")), # Use get() with default removed
+            path=f"{values.data.get('TEST_POSTGRES_DB')}"
         )
 
     # JWT Token settings
-    JWT_SECRET_KEY: str = "demo-secret-key"  # Default value for demo
+    JWT_SECRET_KEY: str = "demo-secret-key" # Keep simple for tests, but change for prod
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 

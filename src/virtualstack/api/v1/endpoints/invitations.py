@@ -4,8 +4,8 @@ from uuid import UUID
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from virtualstack.api.deps import get_current_user, get_db, get_tenant_id
-from virtualstack.core.exceptions import NotFoundException, ValidationError
+from virtualstack.api.deps import get_current_user, get_db, get_current_tenant_id
+from virtualstack.core.exceptions import NotFoundError, ValidationError
 from virtualstack.models.iam.user import User
 from virtualstack.schemas.iam.invitation import (
     InvitationCreate,
@@ -32,7 +32,7 @@ async def create_invitation(
     invitation: InvitationCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    tenant_id: UUID = Depends(get_tenant_id)
+    tenant_id: UUID = Depends(get_current_tenant_id)
 ) -> Any:
     """
     Create a new invitation.
@@ -74,7 +74,7 @@ async def list_pending_invitations(
     limit: int = Query(100, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    tenant_id: UUID = Depends(get_tenant_id)
+    tenant_id: UUID = Depends(get_current_tenant_id)
 ) -> Any:
     """
     List all pending invitations for the tenant.
@@ -98,7 +98,7 @@ async def get_invitation(
     invitation_id: UUID,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    tenant_id: UUID = Depends(get_tenant_id)
+    tenant_id: UUID = Depends(get_current_tenant_id)
 ) -> Any:
     """
     Get a specific invitation by ID.
@@ -135,7 +135,7 @@ async def update_invitation(
     data: InvitationUpdate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    tenant_id: UUID = Depends(get_tenant_id)
+    tenant_id: UUID = Depends(get_current_tenant_id)
 ) -> Any:
     """
     Update an invitation's properties.
@@ -177,8 +177,8 @@ async def revoke_invitation(
     invitation_id: UUID,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    tenant_id: UUID = Depends(get_tenant_id)
-) -> Any:
+    tenant_id: UUID = Depends(get_current_tenant_id)
+) -> None:
     """
     Revoke an invitation.
     """

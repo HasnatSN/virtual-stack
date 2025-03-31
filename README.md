@@ -13,6 +13,17 @@ A multi-tenant cloud management platform backend service built with FastAPI.
 - Support ticket integration
 - Billing and usage tracking
 
+## Project Status (as of last review)
+
+- **Core:** FastAPI app, Config, DB Session (real DB), Base Models/Schemas/Services - Implemented.
+- **Auth:** Endpoints/Schemas exist, logic is **mocked**.
+- **Users:** Basic CRUD implemented.
+- **Tenants:** Basic CRUD implemented.
+- **API Keys:** Implemented and includes validation logic.
+- **Roles:** Basic Role model/endpoints exist. Tenant/User/Permission association models **missing**, related service code **commented out**.
+- **Invitations:** Mostly implemented. `role_id` FK/relationship **commented out** pending Role model completion.
+- **Testing:** Refactored to pytest, Docker test DB, TestClient. Initial health/auth tests written. Test setup requires fixes.
+
 ## Prerequisites
 
 - Python 3.10+

@@ -1,15 +1,17 @@
-from virtualstack.schemas.iam.auth import LoginRequest, Token, TokenPayload
-from virtualstack.schemas.iam.user import User, UserCreate, UserUpdate, UserBase
-from virtualstack.schemas.iam.tenant import Tenant, TenantCreate, TenantUpdate, TenantBase
-from virtualstack.schemas.iam.api_key import APIKey, APIKeyCreate, APIKeyUpdate, APIKeyWithValue, APIKeyScope
-from virtualstack.schemas.iam.role import Role, RoleCreate, RoleUpdate, RoleWithPermissions, RolePermissionCreate, RoleAssignment
-from virtualstack.schemas.iam.invitation import (
-    Invitation, 
+from .auth import LoginRequest, Token, TokenPayload
+from .user import User, UserCreate, UserUpdate, UserBase
+from .tenant import Tenant, TenantCreate, TenantUpdate, TenantBase
+from .api_key import APIKey, APIKeyCreate, APIKeyUpdate, APIKeyWithValue, APIKeyScope
+from .role import Role, RoleCreate, RoleUpdate, RoleWithPermissions, RolePermissionCreate, RoleAssignment
+from .invitation import (
+    InvitationResponse as Invitation,
     InvitationCreate, 
     InvitationUpdate, 
     InvitationVerify, 
     InvitationAccept, 
-    InvitationWithToken
+    InvitationSendResponse,
+    InvitationTokenResponse,
+    InvitationDetailResponse
 )
 
 __all__ = [
@@ -40,5 +42,7 @@ __all__ = [
     "InvitationUpdate",
     "InvitationVerify",
     "InvitationAccept",
-    "InvitationWithToken"
+    "InvitationSendResponse",
+    "InvitationTokenResponse",
+    "InvitationDetailResponse",
 ] 

@@ -1,4 +1,4 @@
-from virtualstack.schemas.iam import *
+from .iam import *
 
 __all__ = [
     "LoginRequest",

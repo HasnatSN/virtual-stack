@@ -45,6 +45,20 @@ services:
       redis:
         condition: service_healthy
 
+  db_test:
+    image: postgres:15
+    container_name: virtualstack_db_test
+    environment:
+      POSTGRES_USER: testuser
+      POSTGRES_PASSWORD: testpassword
+      POSTGRES_DB: virtualstack_test
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data/
+
 volumes:
   postgres_data:
-  redis_data: 
+  redis_data:
+  postgres_test_data:
+    driver: local 
