@@ -2,6 +2,6 @@
 pytest
 pytest-asyncio
 pytest-cov # For coverage reporting
-httpx # Already used by test_functionality.py, good to have here
+httpx[http2,brotli] # Use full installation for ASGI support
 alembic # For potential test DB migrations
 factory-boy # For generating test data 

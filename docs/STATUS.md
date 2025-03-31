@@ -47,21 +47,22 @@
 
 - [x] Test framework setup (pytest, pytest-asyncio)
 - [x] Test database setup (Docker Compose, PostgreSQL)
-- [x] Test client setup (`TestClient` via `httpx`)
-- [x] Core test fixtures (`tests/conftest.py`) - Needs fixes (`async_client`)
-- [x] Basic functional tests (`tests/functional/test_health.py`, `tests/functional/test_auth.py`)
-- [ ] Port remaining functional tests
+- [x] Test client setup (`TestClient`)
+- [x] Core test fixtures (`tests/conftest.py`) - Working
+- [x] Basic functional tests (`tests/functional/test_health.py`, `tests/functional/test_auth.py`) - Passing
+- [ ] Port remaining functional tests (Tenants, Users, API Keys, Roles, Invitations)
+- [ ] Create authentication fixtures for tests
 - [ ] Achieve >80% test coverage
 
 ## Key TODOs / Next Steps
 
-1.  **Fix `async_client` fixture** in `tests/conftest.py` (`TypeError`).
-2.  **Run basic tests** (`test_health`, `test_auth`) successfully against the real test DB.
-3.  **Port functional tests** from old script to `tests/functional/` using new fixtures.
-4.  **Run full test suite** and fix failures encountered against the real DB.
-5.  **Implement missing Role models** (`TenantRole`, `UserTenantRole`, `TenantRolePermission`).
-6.  **Uncomment related code** in `Invitation` model and `Role` service, fix any issues.
-7.  **Implement real authentication logic** (user lookup, password verification) in auth endpoints/dependencies.
-8.  **Write tests** for Role/Permission assignment and Tenant/User management.
-9.  **Achieve target test coverage** (>80%).
-10. **Review and update** `instructions.md` based on this detailed status. 
+1.  **Port functional tests** from old script to `tests/functional/` (Tenants, Users, API Keys, Roles, Invitations).
+2.  **Create authentication fixtures** for tests (e.g., authenticated client, test user/token).
+3.  **Enable and run** ported tests, fixing failures against the real DB.
+4.  **Implement missing Role models** (`TenantRole`, `UserTenantRole`, `TenantRolePermission`).
+5.  **Uncomment related code** in `Invitation` model and `Role` service, fix any issues.
+6.  **Implement real authentication logic** (user lookup, password verification) in auth endpoints/dependencies.
+7.  **Write tests** for Role/Permission assignment and Tenant/User management.
+8.  **Achieve target test coverage** (>80%).
+9.  **Review and update** `docs/instructions.md` based on this detailed status.
+10. **Address warnings** from `pytest` run (Pydantic, asyncio event loop). 

@@ -5,9 +5,9 @@ from typing import AsyncGenerator, Generator
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
-from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
+from fastapi.testclient import TestClient
 
 # Set environment variable to indicate test mode *before* importing settings or app
 os.environ["RUN_ENV"] = "test"
@@ -66,16 +66,16 @@ def app() -> FastAPI:
     """Return the FastAPI application instance."""
     return fastapi_app
 
-@pytest_asyncio.fixture(scope="function")
-async def async_client(app: FastAPI, db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]: # Added db_session dependency
-    """Yield an HTTPX client for making requests to the test app.
-       Overrides the get_db dependency to use the test session.
+@pytest.fixture(scope="function")
+def client(app: FastAPI, db_session: AsyncSession) -> Generator[TestClient, None, None]:
+    """Yield a synchronous TestClient for making requests to the test app.
+       Overrides the get_db dependency to use the async test session.
     """
+    # Define the override function (needs to be async generator)
     async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
         yield db_session
 
     app.dependency_overrides[get_db] = override_get_db
-    # Use httpx.AsyncClient with base_url against the test server provided by pytest
-    async with AsyncClient(base_url="http://testserver") as client: # Removed app=app
-        yield client
-    del app.dependency_overrides[get_db] # Clean up override
+    with TestClient(app) as test_client:
+        yield test_client # Yield the synchronous TestClient
+    del app.dependency_overrides[get_db]

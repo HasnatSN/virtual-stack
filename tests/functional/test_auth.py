@@ -1,18 +1,16 @@
 import pytest
-from httpx import AsyncClient
+from fastapi.testclient import TestClient
 from fastapi import status
 
-# Test data (can be moved to fixtures later)
+# Test data
 TEST_ADMIN = {
     "email": "admin@virtualstack.example",
     "password": "Password123!"
 }
 
-pytestmark = pytest.mark.asyncio
-
-async def test_login(async_client: AsyncClient):
+def test_login(client: TestClient):
     """Test the login endpoint."""
-    response = await async_client.post("/api/v1/auth/login", json={
+    response = client.post("/api/v1/auth/login", json={
         "email": TEST_ADMIN["email"],
         "password": TEST_ADMIN["password"],
     })
@@ -22,12 +20,12 @@ async def test_login(async_client: AsyncClient):
     assert "access_token" in data
     assert data["token_type"] == "bearer"
 
-async def test_login_access_token(async_client: AsyncClient):
+def test_login_access_token(client: TestClient):
     """Test the OAuth2 compatible login endpoint."""
-    response = await async_client.post(
+    response = client.post(
         "/api/v1/auth/login/access-token", 
         data={
-            "username": TEST_ADMIN["email"], # OAuth2 uses 'username'
+            "username": TEST_ADMIN["email"],
             "password": TEST_ADMIN["password"]
         },
         headers={"Content-Type": "application/x-www-form-urlencoded"}
@@ -38,16 +36,16 @@ async def test_login_access_token(async_client: AsyncClient):
     assert "access_token" in data
     assert data["token_type"] == "bearer"
 
-async def test_login_invalid_credentials(async_client: AsyncClient):
+def test_login_invalid_credentials(client: TestClient):
     """Test login with incorrect password."""
-    # Note: This test will pass with the mock authentication, 
+    # Note: This test will pass with the mock authentication,
     # but should fail once real authentication logic is implemented.
-    response = await async_client.post("/api/v1/auth/login", json={
+    response = client.post("/api/v1/auth/login", json={
         "email": TEST_ADMIN["email"],
         "password": "wrongpassword",
     })
     
     # Current mock implementation always returns 200 OK
-    assert response.status_code == status.HTTP_200_OK 
+    assert response.status_code == status.HTTP_200_OK
     # TODO: Update assertion to check for 401 UNAUTHORIZED when real auth is added
     # assert response.status_code == status.HTTP_401_UNAUTHORIZED 
