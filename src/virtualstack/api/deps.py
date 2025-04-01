@@ -1,25 +1,24 @@
-from typing import Dict, Optional, Union, List, Callable
-from datetime import datetime, timedelta
-import jwt
-from pydantic import UUID4
-from functools import wraps
+from typing import Optional
+from uuid import UUID
 
-from fastapi import Depends, HTTPException, status, Security, Request
-from fastapi.security import OAuth2PasswordBearer, APIKeyHeader, APIKeyQuery
+from fastapi import Depends, HTTPException, Security, status
+from fastapi.security import APIKeyHeader, APIKeyQuery, OAuth2PasswordBearer
+import jwt
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from virtualstack.core.config import settings
 from virtualstack.core.exceptions import http_authentication_error
-from virtualstack.core.permissions import Permission, get_user_permissions, has_permission, has_any_permission, has_all_permissions
+from virtualstack.core.permissions import Permission
 from virtualstack.db.session import get_db
-from virtualstack.services.iam.api_key import api_key_service
 from virtualstack.models.iam import User
-from virtualstack.models.iam.api_key import APIKey
+from virtualstack.schemas.iam.auth import TokenPayload
+from virtualstack.services.iam import user_service
+from virtualstack.services.iam.api_key import api_key_service
+
 
 # OAuth2 scheme for token authentication
 oauth2_scheme = OAuth2PasswordBearer(
-    tokenUrl=f"{settings.API_V1_STR}/auth/login",
-    auto_error=False
+    tokenUrl=f"{settings.API_V1_STR}/auth/login/access-token", auto_error=False
 )
 
 # API Key authentication schemes
@@ -28,82 +27,68 @@ api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 api_key_query = APIKeyQuery(name="api_key", auto_error=False)
 
 
-async def get_current_user(
-    token: Optional[str] = Depends(oauth2_scheme)
-) -> Optional[Dict]:
-    """
-    Get current user based on JWT token.
-    
-    Note: This is a simplified implementation for demo purposes.
-    Will be expanded when the User model is fully integrated.
-    """
+async def get_current_user_from_token(
+    db: AsyncSession = Depends(get_db), token: Optional[str] = Depends(oauth2_scheme)
+) -> Optional[User]:
+    """Decode JWT token and retrieve user from database."""
     if not token:
         return None
-        
-    # For demo purposes, return a mock user
-    return {"id": "123e4567-e89b-12d3-a456-426614174000", "email": "admin@example.com", "is_superuser": True}
-    
-    # Original implementation to be used later:
-    # try:
-    #     payload = jwt.decode(
-    #         token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM]
-    #     )
-    #     user_id: UUID4 = payload.get("sub")
-    #     if user_id is None:
-    #         raise http_authentication_error()
-    #     
-    #     # Get user from database
-    #     user = await user_service.get_by_id(user_id)
-    #     if user is None:
-    #         raise http_authentication_error()
-    #         
-    #     return user
-    # except jwt.PyJWTError:
-    #     raise http_authentication_error()
+
+    try:
+        payload_dict = jwt.decode(
+            token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM]
+        )
+        # Validate payload structure using Pydantic model
+        payload = TokenPayload.model_validate(payload_dict)
+        user_id_str = payload.sub
+        if user_id_str is None:
+            raise http_authentication_error(detail="Invalid token payload: Subject missing")
+
+        user_id = UUID(user_id_str)  # Convert sub to UUID
+
+        # Get user from database using record_id
+        user = await user_service.get(db, record_id=user_id)
+        if not user:
+            raise http_authentication_error(detail="User not found for token")
+
+        return user
+    except jwt.ExpiredSignatureError as e:
+        raise http_authentication_error(detail="Token has expired") from e
+    except jwt.PyJWTError as e:
+        raise http_authentication_error(detail="Could not validate token") from e
+    except ValueError as e:  # Handle invalid UUID format in token subject
+        raise http_authentication_error(detail="Invalid user ID format in token") from e
 
 
-async def get_api_key(
+async def get_current_user_from_api_key(
     db: AsyncSession = Depends(get_db),
     api_key_header: Optional[str] = Security(api_key_header),
     api_key_query: Optional[str] = Security(api_key_query),
-) -> Optional[Dict]:
-    """
-    Get and validate API key from header or query parameter.
+) -> Optional[User]:
+    """Get and validate API key from header or query parameter.
     Returns the user associated with the API key if valid.
     """
     api_key = api_key_header or api_key_query
     if not api_key:
         return None
-    
-    # Validate the API key
+
+    # Validate the API key using the service
     result = await api_key_service.validate_api_key(db=db, api_key=api_key)
-    
+
     if not result:
-        return None
-        
-    # Extract API key and user
-    api_key_obj, user = result
-    
-    # For now, we'll convert the User model to a dict for compatibility
-    return {
-        "id": str(user.id),
-        "email": user.email,
-        "is_superuser": user.is_superuser,
-        "is_active": user.is_active,
-        "api_key_id": str(api_key_obj.id),
-        "tenant_id": str(api_key_obj.tenant_id) if api_key_obj.tenant_id else None,
-    }
+        return None  # Service handles logging/errors internally for invalid keys
+
+    # Extract user from the result tuple (api_key_obj, user)
+    _, user = result
+    return user
 
 
-async def get_current_user_from_token_or_api_key(
-    db: AsyncSession = Depends(get_db),
-    token_user: Optional[Dict] = Depends(get_current_user),
-    api_key_user: Optional[Dict] = Depends(get_api_key),
-) -> Dict:
-    """
-    Get current user from either JWT token or API key.
-    
-    This allows endpoints to be authenticated with either method.
+async def get_current_user(
+    token_user: Optional[User] = Depends(get_current_user_from_token),
+    api_key_user: Optional[User] = Depends(get_current_user_from_api_key),
+) -> User:
+    """Get current user from either JWT token or API key.
+    Raises HTTPException if neither authentication method provides a valid user.
     """
     user = token_user or api_key_user
     if not user:
@@ -112,12 +97,10 @@ async def get_current_user_from_token_or_api_key(
 
 
 async def get_current_active_user(
-    current_user: Dict = Depends(get_current_user_from_token_or_api_key),
-) -> Dict:
-    """
-    Get current active user.
-    """
-    if not current_user.get("is_active", True):
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """Get current active user."""
+    if not current_user.is_active:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Inactive user",
@@ -126,12 +109,10 @@ async def get_current_active_user(
 
 
 async def get_current_superuser(
-    current_user: Dict = Depends(get_current_active_user),
-) -> Dict:
-    """
-    Get current superuser.
-    """
-    if not current_user.get("is_superuser"):
+    current_user: User = Depends(get_current_active_user),
+) -> User:
+    """Get current superuser."""
+    if not current_user.is_superuser:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions",
@@ -139,140 +120,136 @@ async def get_current_superuser(
     return current_user
 
 
-# Extract current tenant ID from request context
+# Extract current tenant ID from request context (Placeholder - needs tenant context implementation)
 async def get_current_tenant_id(
-    current_user: Dict = Depends(get_current_active_user),
-) -> Optional[str]:
+    # Depends on how tenant context is established (e.g., from token, header, user profile)
+    # current_user: User = Depends(get_current_active_user),
+) -> Optional[UUID]:
+    """Get the current tenant ID from the request context (Placeholder).
+
+    For API keys, this *could* be derived if the key is tenant-scoped.
+    For user tokens, this needs a mechanism like a selected tenant header or user default.
+
+    Returns None if no specific tenant context is identified.
     """
-    Get the current tenant ID from the user context.
-    
-    For API keys, this will be the tenant_id from the API key (if present).
-    For user tokens, we would normally get this from a tenant selection or default tenant.
-    
-    Returns None for global context (no tenant specified).
-    """
-    return current_user.get("tenant_id")
+    # TODO: Implement actual tenant context logic
+    # This might involve looking at custom headers, claims in JWT,
+    # or properties associated with the authenticated user or API key.
+    # For now, returning None simulates a global context.
+    return None
 
 
-# Permission checking dependencies
+# Permission checking dependencies (Needs actual implementation)
 def require_permission(permission: Permission):
-    """
-    Dependency factory that requires a specific permission.
-    
-    Usage:
-        @router.get("/protected")
-        async def protected_route(
-            current_user: Dict = Depends(require_permission(Permission.USER_READ))
-        ):
-            ...
-    """
+    """Dependency factory that requires a specific permission (currently mocked)."""
+
     async def check_permission(
-        db = Depends(get_db),
-        current_user: Dict = Depends(get_current_active_user),
-        tenant_id: Optional[str] = Depends(get_current_tenant_id),
-    ) -> Dict:
+        current_user: User = Depends(get_current_active_user),
+    ) -> User:
         # Superusers have all permissions
-        if current_user.get("is_superuser"):
+        if current_user.is_superuser:
             return current_user
-            
-        # For now, just check if the user is a superuser
-        # In a real implementation, we would check actual permissions
-        if permission == Permission.TENANT_CREATE:
-            # Only superusers can create tenants
+
+        # --- Mock Implementation Start ---
+        # For now, just check if the user is a superuser or allow common reads
+        if permission == Permission.TENANT_CREATE and not current_user.is_superuser:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Not enough permissions: {permission} required",
             )
-            
-        # For demonstration, assume regular users have common permissions
-        if permission in [
-            Permission.USER_READ, 
-            Permission.TENANT_READ, 
+
+        common_read_permissions = [
+            Permission.USER_READ,
+            Permission.TENANT_READ,
             Permission.API_KEY_READ,
+            Permission.ROLE_READ,
+            Permission.INVITATION_READ,
+        ]
+        if permission in common_read_permissions:
+            return current_user
+        # Allow self-management of API keys
+        if permission in [
             Permission.API_KEY_CREATE,
             Permission.API_KEY_UPDATE,
             Permission.API_KEY_DELETE,
         ]:
             return current_user
-            
-        # For unhandled permissions, deny access
+
+        # Deny other permissions for non-superusers in mock implementation
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Not enough permissions: {permission} required",
+            detail=f"Permission denied (mock implementation): requires {permission}",
         )
-        
+        # --- Mock Implementation End ---
+
+        # return current_user # Return user if permission check passes
+
     return check_permission
 
 
-def require_any_permission(permissions: List[Permission]):
-    """
-    Dependency factory that requires any of the specified permissions.
-    """
+def require_any_permission(permissions: list[Permission]):
+    """Dependency factory that requires any of the specified permissions."""
+
     async def check_permissions(
-        db = Depends(get_db),
-        current_user: Dict = Depends(get_current_active_user),
-        tenant_id: Optional[str] = Depends(get_current_tenant_id),
-    ) -> Dict:
+        current_user: User = Depends(get_current_active_user),
+    ) -> User:
         # Superusers have all permissions
-        if current_user.get("is_superuser"):
+        if current_user.is_superuser:
             return current_user
-            
+
         # For now, just simulate permission checking
         # In a real implementation, we would check actual permissions
-        
+
         # For demonstration, assume regular users have common permissions
         common_permissions = [
-            Permission.USER_READ, 
-            Permission.TENANT_READ, 
+            Permission.USER_READ,
+            Permission.TENANT_READ,
             Permission.API_KEY_READ,
             Permission.API_KEY_CREATE,
             Permission.API_KEY_UPDATE,
             Permission.API_KEY_DELETE,
         ]
-        
+
         if any(p in common_permissions for p in permissions):
             return current_user
-            
+
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Not enough permissions: require any of {[p for p in permissions]}",
+            detail=f"Not enough permissions: require any of {list(permissions)}",
         )
-        
+
     return check_permissions
 
 
-def require_all_permissions(permissions: List[Permission]):
-    """
-    Dependency factory that requires all of the specified permissions.
-    """
+def require_all_permissions(permissions: list[Permission]):
+    """Dependency factory that requires all of the specified permissions."""
+
     async def check_permissions(
-        db = Depends(get_db),
-        current_user: Dict = Depends(get_current_active_user),
-        tenant_id: Optional[str] = Depends(get_current_tenant_id),
-    ) -> Dict:
+        current_user: User = Depends(get_current_active_user),
+    ) -> User:
         # Superusers have all permissions
-        if current_user.get("is_superuser"):
+        if current_user.is_superuser:
             return current_user
-            
+
         # For now, just simulate permission checking
         # In a real implementation, we would check actual permissions
-        
+
         # For demonstration, assume regular users have common permissions
         common_permissions = [
-            Permission.USER_READ, 
-            Permission.TENANT_READ, 
+            Permission.USER_READ,
+            Permission.TENANT_READ,
             Permission.API_KEY_READ,
             Permission.API_KEY_CREATE,
             Permission.API_KEY_UPDATE,
             Permission.API_KEY_DELETE,
         ]
-        
+
         if all(p in common_permissions for p in permissions):
             return current_user
-            
+
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Not enough permissions: require all of {[p for p in permissions]}",
+            detail=f"Not enough permissions: require all of {list(permissions)}",
         )
-        
+
     return check_permissions

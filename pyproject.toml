@@ -55,4 +55,82 @@ python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
-check_untyped_defs = true 
+check_untyped_defs = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "W",
+    "F",
+    "I",
+    "C",
+    "B",
+    "A",
+    "COM",
+    "D",
+    "UP",
+    "N",
+    "S",
+    "BLE",
+    "PIE",
+    "T20",
+    "PYI",
+    "PT",
+    "RSE",
+    "RET",
+    "SLF",
+    "SIM",
+    "TID",
+    "TCH",
+    "ARG",
+    "PTH",
+    "ERA",
+    "PD",
+    "PGH",
+    "PL",
+    "TRY",
+    "PYI"
+]
+ignore = [
+    "E501",
+    "B008",
+    "C901",
+    "COM812",
+    "D100",
+    "D104",
+    "D107",
+    "S101",
+    "PLR2004",
+    "PLR0913",
+    "PGH003",
+    "F811",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["D100", "D101", "D102", "D103", "S101", "T201", "TCH001", "TCH002", "TCH003", "PLR2004", "ARG001"]
+"tests/functional/test_auth.py" = ["S105"]
+"src/virtualstack/models/iam/__init__.py" = ["F401"]
+"src/virtualstack/services/iam/__init__.py" = ["F401"]
+"src/virtualstack/services/iam/role.py" = ["ARG002"]
+"src/virtualstack/api/v1/endpoints/__init__.py" = ["F401"]
+"src/virtualstack/schemas/iam/__init__.py" = ["F401"]
+"alembic/versions/*.py" = ["D100", "D101", "D102", "D103", "D104"]
+"src/virtualstack/api/v1/endpoints/invitations.py" = ["ARG001"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.ruff.lint.isort]
+known-first-party = ["virtualstack"]
+force-sort-within-sections = true
+lines-after-imports = 2
+
+[tool.ruff.lint.pydocstyle]
+convention = "google" 

@@ -1,11 +1,12 @@
-from typing import Optional
-from pydantic import BaseModel, EmailStr, UUID4, Field
 from datetime import datetime
+from typing import Optional
+
+from pydantic import UUID4, BaseModel, EmailStr, Field, ConfigDict
+
 
 class UserBase(BaseModel):
-    """
-    Base User schema with common attributes.
-    """
+    """Base User schema with common attributes."""
+
     email: EmailStr
     first_name: Optional[str] = None
     last_name: Optional[str] = None
@@ -14,16 +15,14 @@ class UserBase(BaseModel):
 
 
 class UserCreate(UserBase):
-    """
-    Schema for creating a new user, which includes the password.
-    """
+    """Schema for creating a new user, which includes the password."""
+
     password: str = Field(..., min_length=8)
 
 
 class UserUpdate(BaseModel):
-    """
-    Schema for updating a user, where all fields are optional.
-    """
+    """Schema for updating a user, where all fields are optional."""
+
     email: Optional[EmailStr] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
@@ -33,13 +32,10 @@ class UserUpdate(BaseModel):
 
 
 class User(UserBase):
-    """
-    Schema for returning a user, which includes the ID and timestamps.
-    """
+    """Schema for returning a user, which includes the ID and timestamps."""
+
     id: UUID4
     created_at: datetime
     updated_at: Optional[datetime] = None
-    
-    class Config:
-        orm_mode = True
-        from_attributes = True 
+
+    model_config = ConfigDict(from_attributes=True)

@@ -1,13 +1,15 @@
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 import os
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from virtualstack.core.config import settings
 
+
 # Determine which database URI to use
 # Use TEST_DATABASE_URI if RUN_ENV is 'test', otherwise use DATABASE_URI
-RUN_ENV = os.getenv("RUN_ENV", "development") # Default to development
+RUN_ENV = os.getenv("RUN_ENV", "development")  # Default to development
 DATABASE_CONNECTION_URI = settings.TEST_DATABASE_URI if RUN_ENV == "test" else settings.DATABASE_URI
 
 if not DATABASE_CONNECTION_URI:
@@ -15,14 +17,12 @@ if not DATABASE_CONNECTION_URI:
 
 engine = create_async_engine(str(DATABASE_CONNECTION_URI), pool_pre_ping=True)
 
-#expire_on_commit=False is important for async sessions
+# expire_on_commit=False is important for async sessions
 AsyncSessionFactory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Dependency that provides an async database session.
-    """
+    """Dependency that provides an async database session."""
     async with AsyncSessionFactory() as session:
         try:
             yield session

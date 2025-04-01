@@ -3,9 +3,9 @@ from sqlalchemy.orm import DeclarativeBase
 
 
 class Base(DeclarativeBase):
-    """Base class for all models"""
-    
+    """Base class for all models."""
+
     # Generate __tablename__ automatically based on class name
     @declared_attr
-    def __tablename__(cls) -> str:
-        return cls.__name__.lower()
+    def __tablename__(self) -> str:
+        return self.__name__.lower()

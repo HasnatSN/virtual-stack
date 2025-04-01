@@ -1,51 +1,48 @@
 import pytest
-from fastapi.testclient import TestClient
+from httpx import AsyncClient
 from fastapi import status
 
-# Test data
-TEST_ADMIN = {
-    "email": "admin@virtualstack.example",
-    "password": "Password123!"
-}
+from virtualstack.core.config import settings
 
-def test_login(client: TestClient):
-    """Test the login endpoint."""
-    response = client.post("/api/v1/auth/login", json={
-        "email": TEST_ADMIN["email"],
-        "password": TEST_ADMIN["password"],
-    })
-    
+# TODO: Add tests for token validation/expiry
+
+
+@pytest.mark.asyncio # Mark as async test
+async def test_login(async_client: AsyncClient): # Add async
+    """Test login endpoint with JSON payload."""
+    login_data = {
+        "email": settings.TEST_USER_EMAIL,
+        "password": settings.TEST_USER_PASSWORD,
+    }
+    response = await async_client.post("/api/v1/auth/login", json=login_data) # Add await
     assert response.status_code == status.HTTP_200_OK, f"Failed with response: {response.text}"
-    data = response.json()
-    assert "access_token" in data
-    assert data["token_type"] == "bearer"
+    token = response.json()
+    assert "access_token" in token
+    assert token["token_type"] == "bearer"
 
-def test_login_access_token(client: TestClient):
-    """Test the OAuth2 compatible login endpoint."""
-    response = client.post(
-        "/api/v1/auth/login/access-token", 
-        data={
-            "username": TEST_ADMIN["email"],
-            "password": TEST_ADMIN["password"]
-        },
-        headers={"Content-Type": "application/x-www-form-urlencoded"}
+
+@pytest.mark.asyncio # Mark as async test
+async def test_login_access_token(async_client: AsyncClient): # Add async
+    """Test OAuth2 compatible login endpoint."""
+    login_data = {
+        "username": settings.TEST_USER_EMAIL,
+        "password": settings.TEST_USER_PASSWORD,
+    }
+    response = await async_client.post( # Add await
+        "/api/v1/auth/login/access-token",
+        data=login_data,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
-    
     assert response.status_code == status.HTTP_200_OK, f"Failed with response: {response.text}"
-    data = response.json()
-    assert "access_token" in data
-    assert data["token_type"] == "bearer"
+    token = response.json()
+    assert "access_token" in token
+    assert token["token_type"] == "bearer"
 
-def test_login_invalid_credentials(client: TestClient):
-    """Test login with incorrect password."""
-    # Note: This test will pass with the mock authentication,
-    # but should fail once real authentication logic is implemented.
-    response = client.post("/api/v1/auth/login", json={
-        "email": TEST_ADMIN["email"],
-        "password": "wrongpassword",
-    })
-    
-    # Current mock implementation always returns 200 OK
-    assert response.status_code == status.HTTP_200_OK
-    # TODO: Update assertion to check for 401 UNAUTHORIZED when real auth is added
-    # assert response.status_code == status.HTTP_401_UNAUTHORIZED 
+
+@pytest.mark.asyncio # Mark as async test
+async def test_login_invalid_credentials(async_client: AsyncClient): # Add async
+    """Test login with invalid credentials."""
+    login_data = {"email": settings.TEST_USER_EMAIL, "password": "wrongpassword"}
+    response = await async_client.post("/api/v1/auth/login", json=login_data) # Add await
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+    assert "Incorrect email or password" in response.json()["detail"]

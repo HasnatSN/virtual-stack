@@ -1,9 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from virtualstack.core.config import settings
-from virtualstack.api.v1.api import api_router
 from virtualstack.api.middleware import setup_middleware
+from virtualstack.api.v1.api import api_router
+from virtualstack.core.config import settings
+
 
 # Create the FastAPI application with OpenAPI docs
 app = FastAPI(
@@ -27,6 +28,7 @@ app.add_middleware(
 # Setup custom middleware
 setup_middleware(app)
 
+
 @app.get("/")
 async def root():
     """Root endpoint for health checks."""
@@ -36,6 +38,7 @@ async def root():
         "name": settings.PROJECT_NAME,
     }
 
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
@@ -44,5 +47,6 @@ async def health_check():
         "version": settings.VERSION,
     }
 
+
 # Import and include API routers
-app.include_router(api_router, prefix=settings.API_V1_STR) 
+app.include_router(api_router, prefix=settings.API_V1_STR)

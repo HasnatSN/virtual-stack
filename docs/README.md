@@ -30,7 +30,7 @@ A multi-tenant cloud management platform backend service built with FastAPI.
 - Poetry for dependency management
 - PostgreSQL 13+
 - Redis 6+
-- Docker and Docker Compose (for development)
+- Docker and Docker Compose (for local development database/Redis)
 
 ## Setup
 
@@ -51,28 +51,37 @@ A multi-tenant cloud management platform backend service built with FastAPI.
    ```
    Edit `.env` with your configuration.
 
-4. Start development services:
+4. Start development services (PostgreSQL and Redis):
    ```bash
-   docker-compose up -d
+   docker-compose up -d postgres redis
    ```
 
 5. Run database migrations:
    ```bash
-   poetry run alembic upgrade head
+   # Ensure your .env file points to the Docker PostgreSQL instance
+   python3 -m alembic upgrade head
    ```
 
 6. Start the development server:
    ```bash
-   poetry run uvicorn virtualstack.main:app --reload
+   python3 -m uvicorn src.virtualstack.main:app --reload --host 0.0.0.0 --port 8000
    ```
 
 ## Development
 
-- Run tests: `poetry run pytest`
-- Format code: `poetry run black .`
-- Sort imports: `poetry run isort .`
-- Type checking: `poetry run mypy .`
-- Lint code: `poetry run flake8`
+- Run tests: `python3 -m pytest`
+- Check for issues (linting, formatting, etc.): `python3 -m ruff check .`
+- Fix fixable issues: `python3 -m ruff check . --fix`
+- Format code: `python3 -m ruff format .`
+- Type checking: `python3 -m mypy src/`
+
+## Code Quality
+
+See `docs/code_quality.md` for details on `ruff` and `pytest-cov` usage.
+
+## Database Migrations
+
+See `docs/database_migrations.md` (TODO: Create this file) for details on using Alembic.
 
 ## API Documentation
 
@@ -84,21 +93,40 @@ Once the server is running, visit:
 
 ```
 virtualstack-backend/
+├── alembic/              # Alembic migration configuration and scripts
+├── docs/                 # Project documentation
 ├── src/
-│   └── virtualstack/
-│       ├── api/            # API endpoints
-│       ├── core/           # Core functionality
-│       ├── models/         # Database models
-│       ├── services/       # Business logic
-│       ├── repositories/   # Data access layer
-│       ├── adapters/       # External service adapters
-│       └── workers/        # Celery tasks
-├── config/                 # Configuration files
-├── scripts/               # Utility scripts
-├── tests/                 # Test files
-└── alembic/              # Database migrations
+│   └── virtualstack/     # Main application source code
+│       ├── __init__.py
+│       ├── api/            # API layer (endpoints, dependencies, middleware)
+│       │   ├── __init__.py
+│       │   ├── deps.py
+│       │   ├── middleware.py
+│       │   └── v1/
+│       │       ├── __init__.py
+│       │       └── endpoints/ # Specific API endpoints (e.g., users.py)
+│       ├── core/           # Core application settings, security, exceptions
+│       ├── db/             # Database session, base class (SQLAlchemy)
+│       ├── models/         # SQLAlchemy ORM models (data structure)
+│       ├── schemas/        # Pydantic schemas (data validation & serialization)
+│       ├── services/       # Business logic layer
+│       ├── adapters/       # External service integrations (e.g., vCenter)
+│       ├── workers/        # Background tasks (Celery)
+│       └── main.py         # FastAPI application entrypoint
+├── tests/                 # Automated tests (pytest)
+│   ├── conftest.py
+│   ├── functional/
+│   └── unit/
+├── .env.example           # Example environment variables
+├── .gitignore
+├── alembic.ini            # Alembic configuration file
+├── docker-compose.yml     # Docker Compose setup for dev services
+├── pyproject.toml         # Project metadata and dependencies (Poetry)
+├── poetry.lock
+├── pytest.ini             # Pytest configuration
+└── README.md              # This file
 ```
 
 ## License
 
-[Your License] 
+[Specify License - e.g., MIT, Apache 2.0] 

@@ -3,32 +3,26 @@ from fastapi import HTTPException, status
 
 class VirtualStackException(Exception):
     """Base exception for VirtualStack errors."""
-    pass
 
 
 class DatabaseError(VirtualStackException):
     """Exception raised for database related errors."""
-    pass
 
 
 class NotFoundError(VirtualStackException):
     """Exception raised when a resource is not found."""
-    pass
 
 
 class AuthenticationError(VirtualStackException):
     """Exception raised for authentication errors."""
-    pass
 
 
 class AuthorizationError(VirtualStackException):
     """Exception raised for authorization errors."""
-    pass
 
 
 class ValidationError(VirtualStackException):
     """Exception raised for validation errors."""
-    pass
 
 
 # HTTP Exception factories
