@@ -1,52 +1,125 @@
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import hashlib
 import secrets
-from typing import Optional
+from typing import Optional, Tuple, List
 from uuid import UUID
 
-from fastapi.encoders import jsonable_encoder
-from sqlalchemy import and_, select
+from fastapi import HTTPException, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from fastapi.encoders import jsonable_encoder
+from sqlalchemy import and_, select, inspect
+from sqlalchemy.orm import load_only
 
 from virtualstack.models.iam.api_key import APIKey
 from virtualstack.models.iam.user import User
-from virtualstack.schemas.iam.api_key import APIKeyCreate, APIKeyUpdate
+from virtualstack.schemas.iam.api_key import APIKeyCreate, APIKeyUpdate, APIKeyScope
 from virtualstack.services.base import CRUDBase
+
+# Setup logger
+import logging
+logger = logging.getLogger(__name__)
 
 
 class APIKeyService(CRUDBase[APIKey, APIKeyCreate, APIKeyUpdate]):
     """Service for API key management."""
 
+    # --- Helper Methods for Key Generation/Hashing ---
+    def _generate_api_key(self, length: int = 32) -> str:
+        """Generate a secure random API key with a prefix."""
+        # VSAK = Virtual Stack API Key prefix
+        return f"vsak_{secrets.token_urlsafe(length)}"
+
+    def _hash_api_key(self, key_value: str) -> str:
+        """Hash the API key using SHA256 for storage."""
+        return hashlib.sha256(key_value.encode()).hexdigest()
+    # --- End Helper Methods ---
+
     async def create_with_user(
-        self, db: AsyncSession, *, obj_in: APIKeyCreate, user_id: UUID
+        self, db: AsyncSession, *, obj_in: APIKeyCreate, user_id: UUID, tenant_id: Optional[UUID] = None
     ) -> tuple[APIKey, str]:
-        """Create a new API key and return both the model and the full key value.
+        """Creates an API key, hashes it, and associates it with a user and optionally a tenant."""
+        # Generate the raw key value using the internal helper method
+        raw_key = self._generate_api_key()
+        key_prefix = raw_key[:8]  # Use first 8 characters as prefix
+        # Hash the key using the internal helper method
+        key_hash = self._hash_api_key(raw_key)
 
-        Args:
-            db: Database session
-            obj_in: API key creation data
-            user_id: User ID of the key owner
+        # Prepare the database object attributes
+        db_obj_data = {
+            "name": obj_in.name,
+            "key_prefix": key_prefix,
+            "key_hash": key_hash,
+            "description": obj_in.description,
+            "is_active": obj_in.is_active,
+            "user_id": user_id,
+            "scope": obj_in.scope,
+        }
 
-        Returns:
-            A tuple containing (api_key_model, api_key_value)
-        """
-        obj_in_data = jsonable_encoder(obj_in)
+        # Handle tenant_id based on scope
+        if obj_in.scope == APIKeyScope.TENANT:
+            if tenant_id is None:
+                # If the function wasn't passed a tenant_id but scope is TENANT,
+                # try getting it from the schema (though typically it should come via context)
+                tenant_id = obj_in.tenant_id
+            if tenant_id is None:
+                 # TODO: This should ideally be caught by validation earlier
+                raise ValueError("tenant_id is required for tenant-scoped API keys")
+            db_obj_data["tenant_id"] = tenant_id
+        elif obj_in.scope == APIKeyScope.GLOBAL:
+            db_obj_data["tenant_id"] = None # Explicitly set to None for GLOBAL scope
 
-        # Generate API key
-        key_value = self._generate_api_key()
-        key_prefix = key_value[:8]
-        key_hash = self._hash_api_key(key_value)
+        # Handle expires_at: Convert to UTC and make naive if present
+        if obj_in.expires_at:
+            # Ensure it's UTC, then remove tzinfo for DB storage
+            expires_at_naive = obj_in.expires_at.astimezone(timezone.utc).replace(tzinfo=None)
+            db_obj_data["expires_at"] = expires_at_naive
+        else:
+            db_obj_data["expires_at"] = None # Explicitly set to None if not provided
 
-        # Create database object
-        db_obj = self.model(
-            **obj_in_data, user_id=user_id, key_prefix=key_prefix, key_hash=key_hash
-        )
+        # Create the database object directly with the prepared attributes
+        db_obj = self.model(**db_obj_data)
 
-        db.add(db_obj)
-        await db.commit()
-        await db.refresh(db_obj)
+        try:
+            db.add(db_obj)
+            await db.commit()
+            await db.refresh(db_obj) # Ensure refresh is after commit
 
-        return db_obj, key_value
+            # Log the creation event
+            logger.info(f"API key {db_obj.id} created successfully.")
+
+            # Explicitly re-fetch the object after commit to ensure server defaults (like created_at) are loaded
+            created_db_obj = await db.get(self.model, db_obj.id) 
+            if not created_db_obj:
+                # This should ideally not happen if commit succeeded
+                logger.error(f"Failed to fetch API key {db_obj.id} immediately after creation.")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to retrieve created API key."
+                )
+            # TODO: Add explicit refresh to ensure server defaults are loaded onto the instance
+            await db.refresh(created_db_obj) # Ensure all attributes are loaded, including server_default
+            # Return the re-fetched DB object and the raw key value
+            return created_db_obj, raw_key
+        except IntegrityError as e:
+            await db.rollback()
+            # Log the error for debugging
+            logger.error(f"Failed to create API key due to IntegrityError: {e}", exc_info=True)
+            # Raise a more specific or user-friendly exception if needed
+            # For now, re-raising or wrapping might be appropriate
+            # Consider specific handling for duplicate names or other constraints
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to create API key: {e}" # TODO: Improve error detail for user
+            )
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"An unexpected error occurred creating API key: {e}", exc_info=True)
+            raise HTTPException(
+                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                 detail=f"An unexpected error occurred: {e}" # TODO: Improve error detail for user
+            )
 
     async def get_by_prefix(self, db: AsyncSession, *, prefix: str) -> Optional[APIKey]:
         """Get an API key by its prefix.
@@ -64,7 +137,7 @@ class APIKeyService(CRUDBase[APIKey, APIKeyCreate, APIKeyUpdate]):
 
     async def get_multi_by_user(
         self, db: AsyncSession, *, user_id: UUID, skip: int = 0, limit: int = 100
-    ) -> list[APIKey]:
+    ) -> List[APIKey]:
         """Get multiple API keys belonging to a user.
 
         Args:
@@ -78,11 +151,15 @@ class APIKeyService(CRUDBase[APIKey, APIKeyCreate, APIKeyUpdate]):
         """
         stmt = select(self.model).where(self.model.user_id == user_id).offset(skip).limit(limit)
         result = await db.execute(stmt)
-        return list(result.scalars().all())
+        keys = result.scalars().all()
+        # TODO: Explicitly refresh each object to load server defaults
+        for key in keys:
+            await db.refresh(key)
+        return keys
 
     async def get_multi_by_tenant(
         self, db: AsyncSession, *, tenant_id: UUID, skip: int = 0, limit: int = 100
-    ) -> list[APIKey]:
+    ) -> List[APIKey]:
         """Get multiple API keys scoped to a tenant.
 
         Args:
@@ -96,7 +173,23 @@ class APIKeyService(CRUDBase[APIKey, APIKeyCreate, APIKeyUpdate]):
         """
         stmt = select(self.model).where(self.model.tenant_id == tenant_id).offset(skip).limit(limit)
         result = await db.execute(stmt)
-        return list(result.scalars().all())
+        keys = result.scalars().all()
+        # TODO: Explicitly refresh each object to load server defaults
+        for key in keys:
+            await db.refresh(key)
+        return keys
+
+    async def get_multi(
+        self, db: AsyncSession, *, skip: int = 0, limit: int = 100
+    ) -> List[APIKey]:
+        """Retrieve multiple API keys."""
+        stmt = select(self.model).offset(skip).limit(limit)
+        result = await db.execute(stmt)
+        keys = result.scalars().all()
+        # TODO: Explicitly refresh each object to load server defaults
+        for key in keys:
+            await db.refresh(key)
+        return keys
 
     async def update_last_used(self, db: AsyncSession, *, db_obj: APIKey) -> APIKey:
         """Update the last_used_at timestamp of an API key.
@@ -108,7 +201,7 @@ class APIKeyService(CRUDBase[APIKey, APIKeyCreate, APIKeyUpdate]):
         Returns:
             The updated API key
         """
-        db_obj.last_used_at = datetime.utcnow()
+        db_obj.last_used_at = datetime.now(timezone.utc)
         db.add(db_obj)
         await db.commit()
         await db.refresh(db_obj)
@@ -147,42 +240,33 @@ class APIKeyService(CRUDBase[APIKey, APIKeyCreate, APIKeyUpdate]):
             return None
 
         # Check if expired
-        if db_obj.expires_at and db_obj.expires_at < datetime.utcnow():
-            return None
+        # TODO: DEBUG - Check types before comparison
+        now_utc = datetime.now(timezone.utc)
+        if db_obj.expires_at:
+            # Make expires_at timezone-aware assuming it's UTC
+            expires_at_aware = db_obj.expires_at.replace(tzinfo=timezone.utc)
+            if expires_at_aware < now_utc:
+                logger.info(f"API key {db_obj.id} validation failed: Expired")
+                return None # Key is expired
 
-        # Get the associated user
-        user_stmt = select(User).where(User.id == db_obj.user_id)
-        user_result = await db.execute(user_stmt)
-        user = user_result.scalars().first()
+        # If key is valid and not expired, update last_used_at
+        db_obj.last_used_at = datetime.now(timezone.utc) # Use aware datetime
+        db.add(db_obj)
+        # We don't commit here; rely on the calling context (e.g., dependency) to handle commit/rollback
+        # await db.commit() # REMOVED - Let caller manage transaction
+        # await db.refresh(db_obj) # REMOVED - last_used_at update doesn't need immediate refresh
 
-        if not user or not user.is_active:
-            return None
+        # Get associated user
+        # user = await db.get(User, db_obj.user_id) # This might require options(selectinload(User))
+        # Optimized: Load user relationship if not already loaded
+        if 'user' not in db_obj.__dict__:
+             await db.refresh(db_obj, attribute_names=['user'])
 
-        # Update the last used timestamp
-        await self.update_last_used(db, db_obj=db_obj)
+        if not db_obj.user:
+             logger.error(f"API key {db_obj.id} is missing associated user {db_obj.user_id}")
+             return None
 
-        return db_obj, user
-
-    def _generate_api_key(self) -> str:
-        """Generate a new random API key.
-
-        Returns:
-            A string containing the API key
-        """
-        # Generate a 32-byte random token
-        token = secrets.token_hex(32)
-        return f"vs_{token}"
-
-    def _hash_api_key(self, key: str) -> str:
-        """Hash an API key for secure storage.
-
-        Args:
-            key: The API key to hash
-
-        Returns:
-            The hashed API key
-        """
-        return hashlib.sha256(key.encode()).hexdigest()
+        return db_obj, db_obj.user # Return tuple (APIKey, User)
 
 
 # Create a singleton instance

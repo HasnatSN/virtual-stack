@@ -1,3 +1,4 @@
+import logging
 from typing import Optional, Any
 from uuid import UUID
 
@@ -15,8 +16,10 @@ from virtualstack.schemas.iam.api_key import (
     APIKeyUpdate,
     APIKeyWithValue,
 )
-from virtualstack.services.iam.api_key import api_key_service
+from virtualstack.services.iam import api_key_service
 
+# TODO: Configure logging properly
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -50,19 +53,46 @@ async def create_api_key(
             db=db,
             obj_in=api_key_in,
             user_id=current_user.id,
+            tenant_id=api_key_in.tenant_id # Pass tenant_id explicitly if provided
         )
 
-        # Convert to response model manually, adding the key value before validation happens implicitly
-        # This avoids validating db_obj against a schema it doesn't fully match (missing key)
-        # and prevents potential re-validation issues with the tenant_id validator.
-        response_data = db_obj.__dict__  # Get attributes from the SQLAlchemy model instance
-        response_data["key"] = key_value  # Add the plaintext key
-        return APIKeyWithValue.model_validate(response_data)  # Validate the complete data
+        # Ensure db_obj is not None (should be handled by service exception if fetch failed)
+        if db_obj is None:
+             raise HTTPException(status_code=500, detail="Failed to retrieve created API key object.")
 
+        # Manually construct dictionary from the ORM object
+        # This helps ensure all fields, including server defaults like created_at,
+        # are available before Pydantic validation.
+        response_data = {
+            "id": db_obj.id,
+            "name": db_obj.name,
+            "key_prefix": db_obj.key_prefix,
+            "description": db_obj.description,
+            "is_active": db_obj.is_active,
+            "expires_at": db_obj.expires_at,
+            "last_used_at": db_obj.last_used_at,
+            "user_id": db_obj.user_id,
+            "tenant_id": db_obj.tenant_id,
+            "created_at": db_obj.created_at,
+            "updated_at": db_obj.updated_at,
+            "scope": db_obj.scope,
+            "key": key_value # Add the raw key
+        }
+        
+        # Now validate the dictionary using the response model
+        return APIKeyWithValue.model_validate(response_data)
+
+    except ValueError as ve: # Catch tenant_id validation error from service
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
     except Exception as e:
+        # Log the full error for debugging
+        logger.exception("Error creating API key endpoint") # Assuming logger is configured
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create API key: {e}",
+            detail=f"Failed to create API key: An unexpected error occurred.",
         )
 
     # response = APIKeyWithValue.model_validate(db_obj) # OLD - Caused validation error

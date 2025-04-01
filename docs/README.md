@@ -1,28 +1,48 @@
 # VirtualStack Backend
 
-A multi-tenant cloud management platform backend service built with FastAPI.
+A multi-tenant cloud management platform backend service built with FastAPI, following Hexagonal Architecture principles.
 
 ## Features
 
-- Multi-tenant architecture
-- Role-based access control (RBAC)
-- vCenter integration for VM management
-- Background job processing with Celery
-- API key authentication
+### Current / In Progress:
+
+- Multi-tenant architecture foundation
+- Core User and Tenant management (CRUD)
+- API Key generation and validation (including **timezone-aware expiry**, scope handling)
+- Role definition management (CRUD for global roles)
+- Basic Tenant/User role assignment (POST/DELETE)
+- Permission assignment to Roles (POST/DELETE)
+- Authentication layer (JWT-based, requires integration with real auth provider eventually)
+- Async Database interactions (PostgreSQL via SQLAlchemy)
+- Configuration via environment variables
+- Basic API documentation via Swagger/ReDoc
+
+### Planned:
+
+- Full Role-Based Access Control (RBAC):
+    - Permission checking logic implementation and integration
+    - Tenant-specific role definitions (if needed)
+- User Invitation system
 - Audit logging
-- Support ticket integration
+- Background job processing (e.g., Celery)
+- Integration with infrastructure providers (e.g., vCenter)
 - Billing and usage tracking
+- Support ticket integration hooks
 
-## Project Status (as of last review)
+## Project Status (April 2024)
 
-- **Core:** FastAPI app, Config, DB Session (real DB), Base Models/Schemas/Services - Implemented.
-- **Auth:** Endpoints/Schemas exist, logic is **mocked**.
-- **Users:** Basic CRUD implemented.
-- **Tenants:** Basic CRUD implemented.
-- **API Keys:** Implemented and includes validation logic.
-- **Roles:** Basic Role model/endpoints exist. Tenant/User/Permission association models **missing**, related service code **commented out**.
-- **Invitations:** Mostly implemented. `role_id` FK/relationship **commented out** pending Role model completion.
-- **Testing:** Refactored to pytest, Docker test DB, TestClient. Initial health/auth tests written. Test setup requires fixes.
+- **Core:** FastAPI app, Config, DB Session, Base Models/Schemas/Services - Implemented and stable.
+- **Architecture:** Adopting Hexagonal (Ports & Adapters). See `docs/architecture_approach.md`.
+- **Roadmap & Priorities:** Focused on resolving current test failures in IAM Domain. See `docs/STATUS.md`.
+- **Auth:** Endpoints/Schemas exist, underlying logic uses basic password hashing but lacks full provider integration.
+- **Users & Tenants:** Basic CRUD implemented and tested.
+- **API Keys:** CRUD, expiry validation (timezone-aware) implemented. **List endpoint currently failing `created_at` validation.**
+- **Roles:** Basic CRUD for global Role definitions implemented.
+- **Role Permissions:** Endpoints for assigning/removing permissions from roles added.
+- **Tenant/User Role Assignment:** Endpoints (POST/DELETE) added.
+- **Permission Checking:** Initial `require_permission` dependency implemented but needs refinement and thorough testing, especially regarding tenant context. **Likely involved in role assignment test failures.**
+- **Invitations:** Models/Endpoints exist but are **blocked** by the incomplete permission checking and role assignment logic.
+- **Testing:** Pytest framework setup with fixtures for DB and authenticated clients (superuser, regular user, tenant admin). Basic tests passing for Health, Auth, Users, Tenants. API Key expiry test passing. **API Key list tests, Role Permission tests, and Role Assignment tests currently failing.** Overall coverage target >80%.
 
 ## Prerequisites
 
@@ -78,6 +98,14 @@ A multi-tenant cloud management platform backend service built with FastAPI.
 ## Code Quality
 
 See `docs/code_quality.md` for details on `ruff` and `pytest-cov` usage.
+
+## Architecture
+
+See `docs/architecture_approach.md` for details on the Hexagonal Architecture approach.
+
+## Roadmap
+
+See `docs/core_roadmap.md` for the current development plan and priorities.
 
 ## Database Migrations
 

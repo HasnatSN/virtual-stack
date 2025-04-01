@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 
-from sqlalchemy import Boolean, Column, DateTime, Enum, ForeignKey, String
+from sqlalchemy import Boolean, Column, DateTime, Enum, ForeignKey, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -20,8 +20,8 @@ class APIKey(Base):
     key_hash = Column(String(255), nullable=False)
     description = Column(String(500), nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
-    expires_at = Column(DateTime, nullable=True)  # NULL means no expiration
-    last_used_at = Column(DateTime, nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)  # NULL means no expiration
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
 
     # Foreign key to user who created the API key
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
@@ -32,8 +32,9 @@ class APIKey(Base):
     )
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # Use client-side default and ensure timezone awareness
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Relationships
     user = relationship("User", back_populates="api_keys")
