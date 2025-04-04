@@ -1,62 +1,82 @@
-from typing import Optional
+from typing import Optional, List
+from uuid import UUID
 
-from pydantic import UUID4, BaseModel, Field
+from pydantic import BaseModel, ConfigDict # Import BaseModel directly
 
-from virtualstack.schemas.base import TimestampMixin
-
-
-class RoleBase(BaseModel):
-    """Base schema for role data."""
-
-    name: str = Field(..., description="Role name")
-    description: Optional[str] = Field(None, description="Role description")
-    is_system_role: bool = Field(False, description="Whether this is a system predefined role")
+from virtualstack.schemas.base import BaseSchema, IDSchema, TimestampSchema
+# Import Permission schema for RoleDetail
+from virtualstack.schemas.iam.permission import Permission as PermissionSchema
 
 
+# --- Base Definitions ---
+class RoleBase(BaseSchema):
+    """Base properties shared by Role schemas."""
+    name: str
+    description: Optional[str] = None
+    # tenant_id: Optional[UUID] = None  # Removed, roles are global/tenant-scoped implicitly via context
+    # is_system_role: bool = False      # Removed, handled by service logic potentially
+
+
+# --- Schemas for API Input ---
 class RoleCreate(RoleBase):
-    """Schema for creating a new role."""
-
-    tenant_id: UUID4 = Field(..., description="Tenant ID this role belongs to")
-
-
-class RoleUpdate(BaseModel):
-    """Schema for updating a role."""
-
-    name: Optional[str] = Field(None, description="Role name")
-    description: Optional[str] = Field(None, description="Role description")
-    is_active: Optional[bool] = Field(None, description="Whether the role is active")
+    """Schema used for creating a new custom Role via the API."""
+    permission_ids: Optional[List[UUID]] = [] # Allow assigning permissions on create
 
 
-class RoleInDBBase(RoleBase, TimestampMixin):
-    """Base schema for roles in the database."""
-
-    id: UUID4
-    tenant_id: UUID4
-    is_active: bool = True
-
-    class Config:
-        from_attributes = True
+class RoleUpdate(BaseModel): # Use BaseModel for optional fields
+    """Schema used for updating an existing custom Role via the API (partial updates)."""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    permission_ids: Optional[List[UUID]] = None # Allow updating permissions
 
 
-class Role(RoleInDBBase):
-    """Schema for role API responses."""
+# Removed RoleAssign schema as role assignment is handled by RoleUserAssignment schemas
 
 
-class RoleWithPermissions(Role):
-    """Schema for role with its permissions."""
-
-    permissions: list[str] = Field([], description="List of permission names")
+# --- Schemas reflecting Database Structure (Internal) ---
+# Removed RoleInDBBase as it's not directly used for API output in this structure
 
 
-class RolePermissionCreate(BaseModel):
-    """Schema for adding a permission to a role."""
+# --- Schemas for API Output ---
+class Role(IDSchema, TimestampSchema, RoleBase): # Combine directly
+    """Schema for returning Role data via the API."""
+    # This inherits id, created_at, updated_at, name, description
+    is_system_role: bool # Add back for output
+    # permission_ids: List[UUID] # Return IDs instead of strings
+    # TODO: Decide if we need full PermissionSchema objects here instead of just IDs
+    # detailed_permissions: List[PermissionSchema] = []
+    model_config = ConfigDict(from_attributes=True)
 
-    permission_id: UUID4 = Field(..., description="Permission ID to add to the role")
+
+class RoleList(BaseModel): # Specific schema for list output
+    """Schema for the list roles endpoint output."""
+    id: UUID
+    name: str
+    description: Optional[str] = None
+    is_system_role: bool
+    user_count: int # Add user count as per MVP spec
+
+    model_config = ConfigDict(from_attributes=True)
 
 
-class RoleAssignment(BaseModel):
-    """Schema for assigning a role to a user."""
+class RoleDetail(Role): # Inherit Role and add detailed permissions
+    """Schema for the get role details endpoint output."""
+    # Properly annotate the permissions field
+    permissions: List[PermissionSchema] = []
 
-    user_id: UUID4 = Field(..., description="User ID to assign the role to")
-    role_id: UUID4 = Field(..., description="Role ID to assign")
-    tenant_id: UUID4 = Field(..., description="Tenant ID for the role assignment")
+
+class RoleUserAssignmentInput(BaseModel):
+    """Input schema for assigning/updating users for a role."""
+    user_ids: List[UUID]
+
+class RoleUserAssignmentOutput(BaseModel):
+    """Output schema confirming user assignments for a role."""
+    user_ids: List[UUID]
+
+# Potentially other output schemas like RoleWithPermissions if needed later
+# class RoleWithPermissions(Role):
+#    detailed_permissions: List[PermissionSchema] = []
+
+# --- Removed conflicting/duplicate definitions --- 
+# Removed the Role definition that was placed too early.
+# Removed RolePermissionCreate, RoleAssignment schemas that were not currently used and maybe outdated.
