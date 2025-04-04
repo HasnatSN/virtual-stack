@@ -1,20 +1,25 @@
 from typing import Optional
 from uuid import UUID
 
-from fastapi import Depends, HTTPException, Security, status
+from fastapi import Depends, HTTPException, Security, status, Request
 from fastapi.security import APIKeyHeader, APIKeyQuery, OAuth2PasswordBearer
-import jwt
+from jose import jwt
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from virtualstack.core.config import settings
 from virtualstack.core.exceptions import http_authentication_error
 from virtualstack.core.permissions import Permission
 from virtualstack.db.session import get_db
-from virtualstack.models.iam import User
+from virtualstack.models.iam import User, Role, Permission as PermissionModel
 from virtualstack.schemas.iam.auth import TokenPayload
 from virtualstack.services.iam import user_service
 from virtualstack.services.iam.api_key import api_key_service
+from virtualstack.models.iam.user_tenant_role import user_tenant_roles_table
+from virtualstack.models.iam.role_permissions import role_permissions_table
+from sqlalchemy import select, distinct, exists
+import logging
 
+logger = logging.getLogger(__name__)
 
 # OAuth2 scheme for token authentication
 oauth2_scheme = OAuth2PasswordBearer(
@@ -26,6 +31,8 @@ API_KEY_NAME = "X-API-Key"
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 api_key_query = APIKeyQuery(name="api_key", auto_error=False)
 
+# TODO: Decide on final Tenant Header name and document it
+TENANT_ID_HEADER = "X-Tenant-ID"
 
 async def get_current_user_from_token(
     db: AsyncSession = Depends(get_db), token: Optional[str] = Depends(oauth2_scheme)
@@ -76,7 +83,7 @@ async def get_current_user_from_api_key(
     result = await api_key_service.validate_api_key(db=db, api_key=api_key)
 
     if not result:
-        return None  # Service handles logging/errors internally for invalid keys
+        raise http_authentication_error(detail="Invalid or expired API Key")
 
     # Extract user from the result tuple (api_key_obj, user)
     _, user = result
@@ -120,136 +127,157 @@ async def get_current_superuser(
     return current_user
 
 
-# Extract current tenant ID from request context (Placeholder - needs tenant context implementation)
-async def get_current_tenant_id(
-    # Depends on how tenant context is established (e.g., from token, header, user profile)
-    # current_user: User = Depends(get_current_active_user),
-) -> Optional[UUID]:
-    """Get the current tenant ID from the request context (Placeholder).
-
-    For API keys, this *could* be derived if the key is tenant-scoped.
-    For user tokens, this needs a mechanism like a selected tenant header or user default.
-
-    Returns None if no specific tenant context is identified.
+# TODO: Add tests for API Key validation scenarios
+# TODO: Consider rate limiting for API Key validation
+async def get_current_user_from_api_key(
+    db: AsyncSession = Depends(get_db),
+    api_key_header: Optional[str] = Security(api_key_header),
+    api_key_query: Optional[str] = Security(api_key_query),
+) -> Optional[User]:
+    """Get and validate API key from header or query parameter.
+    Returns the user associated with the API key if valid.
     """
-    # TODO: Implement actual tenant context logic
-    # This might involve looking at custom headers, claims in JWT,
-    # or properties associated with the authenticated user or API key.
-    # For now, returning None simulates a global context.
-    return None
+    api_key = api_key_header or api_key_query
+    if not api_key:
+        return None
+
+    # Validate the API key using the service
+    result = await api_key_service.validate_api_key(db=db, api_key=api_key)
+
+    if not result:
+        raise http_authentication_error(detail="Invalid or expired API Key")
+
+    # Extract user from the result tuple (api_key_obj, user)
+    _, user = result
+    return user
 
 
-# Permission checking dependencies (Needs actual implementation)
+# TODO: Document the expected header for tenant ID (e.g., X-Tenant-ID)
+# TODO: Add tests for various tenant ID header scenarios (missing, invalid format)
+def get_tenant_id_from_header(request: Request) -> Optional[UUID]:
+    """Dependency to extract and validate tenant_id from a request header."""
+    tenant_id_str = request.headers.get(TENANT_ID_HEADER)
+    if not tenant_id_str:
+        # If header is missing, we cannot determine tenant context
+        logger.warning(f"Tenant context header '{TENANT_ID_HEADER}' missing.")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Missing tenant context header: {TENANT_ID_HEADER}"
+        )
+    try:
+        tenant_id = UUID(tenant_id_str)
+        return tenant_id
+    except ValueError:
+        # Handle invalid UUID format in header
+        logger.warning(f"Invalid UUID format in {TENANT_ID_HEADER} header: {tenant_id_str}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid Tenant ID format in header '{TENANT_ID_HEADER}'."
+        )
+
+
+# TODO: Add tests for tenant existence check with header dependency
+async def check_tenant_exists(db: AsyncSession, tenant_id: UUID) -> UUID:
+    """Helper function (not a dependency itself) to check if a tenant exists."""
+    # Import tenant_service locally to avoid circular dependencies at module level
+    from virtualstack.services.iam import tenant_service
+    tenant = await tenant_service.get(db, record_id=tenant_id)
+    if not tenant:
+        logger.warning(f"Tenant existence check failed: Tenant {tenant_id} not found.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Tenant {tenant_id} not found."
+        )
+    return tenant_id # Return the validated tenant_id
+
+
+# TODO: Ensure frontend sends the correct Tenant ID header
+# TODO: Add tests for this consolidated dependency
+async def get_validated_tenant_id(
+    db: AsyncSession = Depends(get_db),
+    tenant_id: UUID = Depends(get_tenant_id_from_header)
+) -> UUID:
+    """Consolidated dependency: gets tenant ID from header and validates its existence."""
+    return await check_tenant_exists(db=db, tenant_id=tenant_id)
+
+
+# TODO: Add tests for permission checks using header-based tenant ID
+# TODO: Add require_any_permission and require_all_permissions variants using header
 def require_permission(permission: Permission):
-    """Dependency factory that requires a specific permission (currently mocked)."""
+    """Dependency factory that requires a specific permission within the tenant context
+    derived from the request header (e.g., X-Tenant-ID).
+    """
 
     async def check_permission(
         current_user: User = Depends(get_current_active_user),
+        # Depend on get_validated_tenant_id to ensure tenant_id is valid and tenant exists
+        tenant_id: UUID = Depends(get_validated_tenant_id),
+        db: AsyncSession = Depends(get_db),
     ) -> User:
+        """Checks if the current user has the required permission within the tenant context."""
         # Superusers have all permissions
         if current_user.is_superuser:
             return current_user
 
-        # --- Mock Implementation Start ---
-        # For now, just check if the user is a superuser or allow common reads
-        if permission == Permission.TENANT_CREATE and not current_user.is_superuser:
+        # --- Check User Tenant Membership & Permission ---
+        # Combine checks for efficiency: Find if user has *any* role in the tenant
+        # that grants the required permission.
+        has_permission_stmt = (
+            select(exists())
+            .select_from(user_tenant_roles_table)
+            .join(role_permissions_table, user_tenant_roles_table.c.role_id == role_permissions_table.c.role_id)
+            .join(PermissionModel, role_permissions_table.c.permission_id == PermissionModel.id)
+            .where(
+                user_tenant_roles_table.c.user_id == current_user.id,
+                user_tenant_roles_table.c.tenant_id == tenant_id,
+                PermissionModel.code == permission.value # Compare with permission enum's value (string code)
+            )
+        )
+
+        has_perm = await db.scalar(has_permission_stmt)
+
+        if not has_perm:
+            logger.warning(
+                f"Permission denied: User {current_user.id} lacks permission '{permission.value}' in Tenant {tenant_id} (derived from header)."
+            )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Not enough permissions: {permission} required",
+                detail="You do not have permission to perform this action in this tenant.",
             )
 
-        common_read_permissions = [
-            Permission.USER_READ,
-            Permission.TENANT_READ,
-            Permission.API_KEY_READ,
-            Permission.ROLE_READ,
-            Permission.INVITATION_READ,
-        ]
-        if permission in common_read_permissions:
-            return current_user
-        # Allow self-management of API keys
-        if permission in [
-            Permission.API_KEY_CREATE,
-            Permission.API_KEY_UPDATE,
-            Permission.API_KEY_DELETE,
-        ]:
-            return current_user
-
-        # Deny other permissions for non-superusers in mock implementation
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Permission denied (mock implementation): requires {permission}",
-        )
-        # --- Mock Implementation End ---
-
-        # return current_user # Return user if permission check passes
+        # If permission check passes, return the user object
+        return current_user
 
     return check_permission
 
 
-def require_any_permission(permissions: list[Permission]):
-    """Dependency factory that requires any of the specified permissions."""
+# --- Resource-Specific Permission Checks (Examples - Adapt as needed) ---
 
-    async def check_permissions(
-        current_user: User = Depends(get_current_active_user),
-    ) -> User:
-        # Superusers have all permissions
-        if current_user.is_superuser:
-            return current_user
-
-        # For now, just simulate permission checking
-        # In a real implementation, we would check actual permissions
-
-        # For demonstration, assume regular users have common permissions
-        common_permissions = [
-            Permission.USER_READ,
-            Permission.TENANT_READ,
-            Permission.API_KEY_READ,
-            Permission.API_KEY_CREATE,
-            Permission.API_KEY_UPDATE,
-            Permission.API_KEY_DELETE,
-        ]
-
-        if any(p in common_permissions for p in permissions):
-            return current_user
-
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Not enough permissions: require any of {list(permissions)}",
-        )
-
-    return check_permissions
+# Example: Check if user can manage a specific Role (is it custom and in their tenant?)
+# async def require_role_management_permission(
+#     role_id: UUID,
+#     tenant_id: UUID = Depends(check_tenant_exists),
+#     current_user: User = Depends(get_current_active_user),
+#     db: AsyncSession = Depends(get_db),
+# ) -> Role:
+#     """Dependency to check if user can manage a specific role.
+#     Ensures the role exists, is custom (not system), and belongs to the current tenant context.
+#     Also implicitly requires ROLE_UPDATE or ROLE_DELETE permission via other dependencies.
+#     """
+#     role = await role_service.get(db, record_id=role_id)
+#     if not role:
+#         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found")
+#     if role.is_system_role:
+#         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot manage system roles.")
+#     if role.tenant_id != tenant_id:
+#         # This check might be redundant if the caller route already enforces tenant context
+#         # but it provides an extra layer of security.
+#         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Role does not belong to this tenant.")
+#     return role
 
 
-def require_all_permissions(permissions: list[Permission]):
-    """Dependency factory that requires all of the specified permissions."""
+# TODO: Define similar dependencies for other resources like Invitations, API Keys, etc.
+# ensuring checks for tenant ownership and necessary permissions are performed.
 
-    async def check_permissions(
-        current_user: User = Depends(get_current_active_user),
-    ) -> User:
-        # Superusers have all permissions
-        if current_user.is_superuser:
-            return current_user
-
-        # For now, just simulate permission checking
-        # In a real implementation, we would check actual permissions
-
-        # For demonstration, assume regular users have common permissions
-        common_permissions = [
-            Permission.USER_READ,
-            Permission.TENANT_READ,
-            Permission.API_KEY_READ,
-            Permission.API_KEY_CREATE,
-            Permission.API_KEY_UPDATE,
-            Permission.API_KEY_DELETE,
-        ]
-
-        if all(p in common_permissions for p in permissions):
-            return current_user
-
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Not enough permissions: require all of {list(permissions)}",
-        )
-
-    return check_permissions
+# TODO: Refactor permission checks to be more granular and potentially cache results
+# for complex scenarios or performance optimization if needed later.
