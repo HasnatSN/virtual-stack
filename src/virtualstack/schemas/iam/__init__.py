@@ -12,11 +12,12 @@ from .invitation import (
 from .invitation import InvitationResponse as Invitation
 from .role import (
     Role,
-    RoleAssignment,
     RoleCreate,
-    RolePermissionCreate,
     RoleUpdate,
-    RoleWithPermissions,
+    RoleList,
+    RoleDetail,
+    RoleUserAssignmentInput,
+    RoleUserAssignmentOutput,
 )
 from .tenant import Tenant, TenantBase, TenantCreate, TenantUpdate
 from .user import User, UserBase, UserCreate, UserUpdate
@@ -42,9 +43,10 @@ __all__ = [
     "Role",
     "RoleCreate",
     "RoleUpdate",
-    "RoleWithPermissions",
-    "RolePermissionCreate",
-    "RoleAssignment",
+    "RoleList",
+    "RoleDetail",
+    "RoleUserAssignmentInput",
+    "RoleUserAssignmentOutput",
     "Invitation",
     "InvitationCreate",
     "InvitationUpdate",
