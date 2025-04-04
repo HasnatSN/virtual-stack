@@ -46,6 +46,19 @@ async def login_access_token(
     }
 
 
+# TODO: Add a /token endpoint to match the front-end MVP requirements
+@router.post("/token", response_model=Token, status_code=status.HTTP_200_OK)
+async def get_token(
+    db: AsyncSession = Depends(get_db),
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    _: bool = Depends(login_rate_limiter),
+) -> Any:
+    """OAuth2 compatible token endpoint (alias for login_access_token).
+    This endpoint matches the frontend MVP requirements.
+    """
+    return await login_access_token(db=db, form_data=form_data, _=_)
+
+
 @router.post("/login", response_model=Token, status_code=status.HTTP_200_OK)
 async def login(
     login_data: LoginRequest,
