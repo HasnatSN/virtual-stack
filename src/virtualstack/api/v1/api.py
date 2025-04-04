@@ -9,6 +9,7 @@ from virtualstack.api.v1.endpoints import ( # noqa: F401
     users,
     tenant_user_management, # Add the new router
     tenant_header_roles, # Add the new tenant header-based roles router
+    tenant_header_users, # Add the new tenant header-based users router
 )
 
 
@@ -17,8 +18,8 @@ api_router = APIRouter()
 # Include authentication endpoints
 api_router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 
-# Include user management endpoints
-api_router.include_router(users.router, prefix="/users", tags=["Users"])
+# Include user management endpoints with header-based tenant context (for frontend MVP)
+api_router.include_router(tenant_header_users.router, prefix="/users", tags=["Users"])
 
 # Include tenant management endpoints
 api_router.include_router(tenants.router, prefix="/tenants", tags=["Tenants"])
