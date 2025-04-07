@@ -4,14 +4,20 @@ import logging
 from dotenv import load_dotenv
 from typing import Optional
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Setup basic logging
+# TODO: Make logging level configurable
+def setup_logging():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
 
 # Load environment variables for API URL, username, password
 load_dotenv()
-API_BASE_URL = os.getenv("API_URL", "http://127.0.0.1:8000") # Default to localhost:8000
-TEST_USERNAME = os.getenv("TEST_USER_EMAIL", "admin@example.com") # Use env var or default
-TEST_PASSWORD = os.getenv("TEST_USER_PASSWORD", "changeme") # Use env var or default
+API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000") # Default to localhost:8000
+TEST_USERNAME = os.getenv("TEST_USERNAME", "admin@example.com") # Use env var or default
+TEST_PASSWORD = os.getenv("TEST_PASSWORD", "changeme") # Use env var or default
 
 # TODO: Ensure the TEST_USER_EMAIL and TEST_USER_PASSWORD exist in the database
 #       and are associated with at least one tenant for tenant listing to work.
@@ -81,6 +87,62 @@ def log_non_json_error(response: httpx.Response, context: str):
         error_detail = response.text
     logging.error(f"❌ {context} FAILED: Status code {response.status_code}")
     logging.error(f"{context} error response (non-JSON): {error_detail}")
+
+def test_login(client: httpx.Client) -> Optional[str]:
+    """Attempts to log in and returns the access token."""
+    url = f"{API_BASE_URL}/api/v1/auth/token"
+    logging.info(f"Attempting login: POST {url} for user {TEST_USERNAME}")
+    try:
+        data = {"username": TEST_USERNAME, "password": TEST_PASSWORD}
+        response = client.post(url, data=data)
+        logging.info(f"Login status: {response.status_code}")
+        if response.status_code == 200:
+            token_data = response.json()
+            assert "access_token" in token_data
+            assert token_data["token_type"] == "bearer"
+            # logging.info(f"🔑 Login successful, token obtained: {token_data['access_token'][:10]}...")
+            return token_data["access_token"]
+        else:
+            log_non_json_error(response, "Login")
+            response.raise_for_status()
+    except httpx.HTTPStatusError as e:
+        logging.error(f"❌ Login FAILED: HTTP status error {e}")
+    except httpx.RequestError as e:
+        logging.error(f"❌ Login FAILED: Request error {e}")
+    except Exception as e:
+        logging.error(f"❌ Login FAILED: Unexpected error {e}")
+        logging.exception("Exception details:")
+    return None
+
+def test_get_current_user(client: httpx.Client, token: str):
+    """Tests retrieving the current authenticated user's info."""
+    url = f"{api_v1_base}/users/me"
+    logging.info(f"Testing get current user: GET {url}")
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        response = client.get(url, headers=headers)
+        logging.info(f"Get current user status: {response.status_code}")
+        if response.status_code == 200:
+            user_info = response.json()
+            logging.info(f"Get current user response: {user_info}")
+            assert "id" in user_info
+            assert user_info["email"] == "admin@example.com" # Assuming login uses this
+            assert "is_active" in user_info
+            assert "is_superuser" in user_info
+            # Add other checks if needed (e.g., full_name)
+            logging.info("✅ Get current user PASSED")
+            return True
+        else:
+            log_non_json_error(response, "Get current user")
+            response.raise_for_status()
+    except httpx.HTTPStatusError as e:
+        logging.error(f"❌ Get current user FAILED: HTTP status error {e}")
+    except httpx.RequestError as e:
+        logging.error(f"❌ Get current user FAILED: Request error {e}")
+    except Exception as e:
+        logging.error(f"❌ Get current user FAILED: Unexpected error {e}")
+        logging.exception("Exception details:") # Log full traceback for unexpected errors
+    return False
 
 def test_list_tenants(client: httpx.Client, token: str):
     url = f"{api_v1_base}/tenants/" # Use base URL and add trailing slash
@@ -163,20 +225,35 @@ def test_list_users_in_tenant(client: httpx.Client, token: str, tenant_id: str):
     except Exception as exc:
         logging.error(f"❌ List users FAILED: An unexpected error occurred: {exc}")
 
+def main():
+    setup_logging()
+    logging.info("--- Starting Basic API Tests ---")
+    with httpx.Client() as client:
+        # 1. Test Health Check
+        test_health_check()
+
+        # 2. Test Login
+        token = test_login(client)
+        if not token:
+            logging.error("Login failed, cannot proceed with authenticated tests.")
+            return
+        logging.info(f"🔑 Login successful, token obtained.")
+
+        # 3. Test Get Current User (New Test)
+        if not test_get_current_user(client, token):
+             logging.error("Get current user failed, stopping subsequent tests that might depend on user context.")
+             # Decide if we should stop or continue
+             # return # Option: Stop if /users/me is critical
+
+        # 4. Test List Tenants
+        tenant_id = test_list_tenants(client, token)
+        if not tenant_id:
+            logging.warning("⚠️ Skipping user tests as no tenant ID was retrieved.")
+        else:
+            # 5. Test List Users (only if tenant_id was found)
+            test_list_users_in_tenant(client, token, tenant_id)
+
+    logging.info("--- Basic API Tests Finished ---")
 
 if __name__ == "__main__":
-    logging.info("--- Starting Basic API Tests ---")
-    test_health_check()
-
-    # Use a single client session for subsequent requests
-    with httpx.Client() as client:
-        token = get_auth_token(client)
-        if token:
-            # Test endpoints requiring authentication
-            tenant_id = test_list_tenants(client, token)
-            if tenant_id: # Only proceed if we got a tenant ID
-                test_list_users_in_tenant(client, token, tenant_id)
-            else:
-                logging.warning("⚠️ Skipping user tests as no tenant ID was retrieved.")
-
-    logging.info("--- Basic API Tests Finished ---") 
+    main() 
