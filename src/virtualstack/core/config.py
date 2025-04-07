@@ -5,6 +5,7 @@ from pydantic import (
     PostgresDsn,
     ValidationInfo,
     field_validator,
+    model_validator,
     Field
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -48,49 +49,70 @@ class Settings(BaseSettings):
 
     # Database settings
     # Main DB
-    DATABASE_URL: Optional[str] = None
-    POSTGRES_SERVER: str = "db"  # Changed default to match docker-compose service name
-    POSTGRES_USER: str = "postgres"
-    POSTGRES_PASSWORD: str = "postgres"
-    POSTGRES_DB: str = "virtualstack"
-    POSTGRES_PORT: str = "5432"
-    DATABASE_URI: Optional[PostgresDsn] = None
+    DATABASE_URL: Optional[PostgresDsn] = None
+    POSTGRES_SERVER: str = Field("db", description="Default DB host if DATABASE_URL not set")
+    POSTGRES_USER: str = Field("postgres", description="Default DB user if DATABASE_URL not set")
+    POSTGRES_PASSWORD: str = Field("postgres", description="Default DB password if DATABASE_URL not set")
+    POSTGRES_DB: str = Field("virtualstack", description="Default DB name if DATABASE_URL not set")
+    POSTGRES_PORT: str = Field("5432", description="Default DB port if DATABASE_URL not set")
 
     # Test DB
-    TEST_DATABASE_URL: Optional[str] = None
-    TEST_POSTGRES_SERVER: str = "localhost"  # Default for local test runs without docker
-    TEST_POSTGRES_USER: str = "testuser"
-    TEST_POSTGRES_PASSWORD: str = "testpassword"
-    TEST_POSTGRES_DB: str = "virtualstack_test"
-    TEST_POSTGRES_PORT: str = "5433"  # Default for local test runs without docker
-    TEST_DATABASE_URI: Optional[PostgresDsn] = None
+    TEST_DATABASE_URL: Optional[PostgresDsn] = None
+    TEST_POSTGRES_SERVER: str = Field("localhost", description="Default Test DB host if TEST_DATABASE_URL not set")
+    TEST_POSTGRES_USER: str = Field("testuser", description="Default Test DB user if TEST_DATABASE_URL not set")
+    TEST_POSTGRES_PASSWORD: str = Field("testpassword", description="Default Test DB password if TEST_DATABASE_URL not set")
+    TEST_POSTGRES_DB: str = Field("virtualstack_test", description="Default Test DB name if TEST_DATABASE_URL not set")
+    TEST_POSTGRES_PORT: str = Field("5433", description="Default Test DB port if TEST_DATABASE_URL not set")
 
-    @field_validator("DATABASE_URI", mode="before")
+    @model_validator(mode='before')
     @classmethod
-    def assemble_db_connection(cls, v: Optional[str], values: ValidationInfo) -> Any:
+    def build_test_database_url(cls, values: dict[str, Any]) -> dict[str, Any]:
+        """Build TEST_DATABASE_URL from components if not explicitly set in env."""
+        # Check if TEST_DATABASE_URL is already set (e.g., from .env)
+        if values.get('TEST_DATABASE_URL') is not None:
+            return values # Use the value from .env
+
+        # If not set, build it from components
+        scheme = "postgresql+asyncpg"
+        user = values.get('TEST_POSTGRES_USER')
+        password = values.get('TEST_POSTGRES_PASSWORD')
+        host = values.get('TEST_POSTGRES_SERVER')
+        port = values.get('TEST_POSTGRES_PORT')
+        db = values.get('TEST_POSTGRES_DB')
+
+        if all([user, password, host, port, db]): # Ensure all components are present
+            # Directly assign the built URL string to the dictionary Pydantic will use
+            # Pydantic will then validate this string against the PostgresDsn type hint later
+            values['TEST_DATABASE_URL'] = (
+                f"{scheme}://{user}:{password}@{host}:{port}/{db}"
+            )
+        else:
+            # Handle cases where components might be missing if defaults weren't set properly
+            # For now, we rely on the defaults being defined via Field()
+            pass 
+
+        return values
+
+    # JWT Token settings
+    def assemble_test_db_connection(cls, v: Optional[str], info: ValidationInfo) -> Any:
+        """Build TEST_DATABASE_URL from components if not set explicitly."""
         if isinstance(v, str):
+            # If TEST_DATABASE_URL is explicitly set (as str), validate and return
+            return PostgresDsn(v)
+        elif v is not None:
+            # If it's already a PostgresDsn (e.g., from default), return it
             return v
+        
+        # If v is None, assemble from components
+        values = info.data
         return PostgresDsn.build(
             scheme="postgresql+asyncpg",
-            username=values.data.get("POSTGRES_USER"),
-            password=values.data.get("POSTGRES_PASSWORD"),
-            host=values.data.get("POSTGRES_SERVER"),
-            port=int(values.data.get("POSTGRES_PORT")),
-            path=f"{values.data.get('POSTGRES_DB') or ''}",
-        )
-
-    @field_validator("TEST_DATABASE_URI", mode="before")
-    @classmethod
-    def assemble_test_db_connection(cls, v: Optional[str], values: ValidationInfo) -> Any:
-        if isinstance(v, str):
-            return v
-        return PostgresDsn.build(
-            scheme="postgresql+asyncpg",
-            username=values.data.get("TEST_POSTGRES_USER"),
-            password=values.data.get("TEST_POSTGRES_PASSWORD"),
-            host=values.data.get("TEST_POSTGRES_SERVER"),
-            port=int(values.data.get("TEST_POSTGRES_PORT")),
-            path=f"{values.data.get('TEST_POSTGRES_DB') or values.data.get('POSTGRES_DB') or ''}",
+            username=values.get("TEST_POSTGRES_USER"),
+            password=values.get("TEST_POSTGRES_PASSWORD"),
+            host=values.get("TEST_POSTGRES_SERVER"),
+            # Use the port from .env if provided, otherwise default
+            port=int(values.get("TEST_POSTGRES_PORT", 5433)), 
+            path=f"{values.get('TEST_POSTGRES_DB') or ''}",
         )
 
     # JWT Token settings
@@ -101,6 +123,7 @@ class Settings(BaseSettings):
     # Test User Settings
     TEST_USER_EMAIL: str = "admin@virtualstack.example"
     TEST_USER_PASSWORD: str = "testpassword123!"
+    TEST_TENANT_SLUG: str = "test-tenant"
 
     # Redis settings
     REDIS_URL: Optional[str] = None

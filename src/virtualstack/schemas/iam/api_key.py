@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from pydantic import UUID4, BaseModel, Field
+from pydantic import UUID4, BaseModel, Field, ConfigDict
 
 
 class APIKeyScope(str, Enum):
@@ -57,9 +57,8 @@ class APIKeyInDB(APIKeyBase):
     updated_at: Optional[datetime] = None
     last_used_at: Optional[datetime] = None
 
-    class Config:
-        orm_mode = True
-        from_attributes = True
+    # Use ConfigDict for Pydantic V2 compatibility
+    model_config = ConfigDict(from_attributes=True)
 
 
 class APIKeyWithValue(APIKeyInDB):
@@ -69,9 +68,8 @@ class APIKeyWithValue(APIKeyInDB):
 
     key: str = Field(..., description="The full API key value (only returned on creation)")
 
-    class Config:
-        orm_mode = True
-        from_attributes = True
+    # Inherits model_config from APIKeyInDB, but we can redefine if needed
+    # model_config = ConfigDict(from_attributes=True)
 
 
 class APIKey(APIKeyInDB):

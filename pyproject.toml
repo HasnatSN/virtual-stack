@@ -25,6 +25,10 @@ prometheus-fastapi-instrumentator = "^6.1.0"
 prometheus-client = "^0.20.0"
 sentry-sdk = {extras = ["fastapi"], version = "^1.40.6"}
 loguru = "^0.7.2"
+asyncpg = "^0.30.0"
+email-validator = "^2.2.0"
+python-multipart = "^0.0.20"
+greenlet = "^3.1.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0.2"

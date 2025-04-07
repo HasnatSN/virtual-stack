@@ -3,6 +3,7 @@ import secrets
 from typing import Any, Optional
 from uuid import UUID
 
+import logging
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +13,8 @@ from virtualstack.models.iam.invitation import Invitation, InvitationStatus
 from virtualstack.models.iam.tenant import Tenant
 from virtualstack.models.iam.user import User
 from virtualstack.services.base import CRUDBase
+
+logger = logging.getLogger(__name__)
 
 
 class InvitationService(CRUDBase[Invitation, dict[str, Any], dict[str, Any]]):
@@ -173,7 +176,7 @@ class InvitationService(CRUDBase[Invitation, dict[str, Any], dict[str, Any]]):
     async def accept_invitation(
         self, db: AsyncSession, *, token: str, user_id: UUID
     ) -> Optional[Invitation]:
-        """Accept an invitation and associate it with a user.
+        """Accept an invitation and associate it with a user. Assigns role if specified.
 
         Args:
             db: Database session
@@ -188,14 +191,51 @@ class InvitationService(CRUDBase[Invitation, dict[str, Any], dict[str, Any]]):
         if not invitation:
             return None
 
-        # Update invitation
+        # Update invitation status and user association
         invitation.status = InvitationStatus.ACCEPTED
         invitation.user_id = user_id
         invitation.accepted_at = datetime.utcnow()
 
-        await db.commit()
-        await db.refresh(invitation)
+        # --- Assign Role if specified --- TODO: Add tests for this logic
+        assigned_role_id = None
+        if invitation.role_id:
+            # Import user_service locally to avoid circular dependency
+            from virtualstack.services.iam import user_service
+            try:
+                logger.info(
+                    f"Attempting to assign role {invitation.role_id} to user {user_id} "
+                    f"in tenant {invitation.tenant_id} upon invitation acceptance."
+                )
 
+                # TODO: Consider potential race conditions or if user already has the role.
+                # user_service.assign_role_to_user_in_tenant should handle duplicates gracefully.
+                await user_service.assign_role_to_user_in_tenant(
+                    db=db,
+                    user_id=user_id,
+                    tenant_id=invitation.tenant_id,
+                    role_id=invitation.role_id,
+                )
+                assigned_role_id = invitation.role_id
+                logger.info(
+                    f"Successfully assigned role {invitation.role_id} to user {user_id} "
+                    f"in tenant {invitation.tenant_id}."
+                )
+            except Exception as e:
+                # Log an error if role assignment fails, but don't prevent invitation acceptance
+                logger.error(
+                    f"Failed to assign role {invitation.role_id} to user {user_id} "
+                    f"in tenant {invitation.tenant_id} during invitation acceptance: {e}",
+                    exc_info=True, # Include stack trace
+                )
+                # TODO: Decide on error handling strategy. Should acceptance fail if role assignment fails?
+                # For now, we proceed with acceptance but log the error.
+
+        # Commit changes (invitation status, user_id, accepted_at)
+        await db.commit()
+        await db.refresh(invitation) # Refresh to get updated state
+
+        # Return the updated invitation model
+        # The assigned_role_id is not part of the return model, just logged.
         return invitation
 
     async def revoke_invitation(
@@ -210,36 +250,40 @@ class InvitationService(CRUDBase[Invitation, dict[str, Any], dict[str, Any]]):
         Returns:
             Updated invitation or None if not found
         """
-        invitation = await self.get(db, id=invitation_id)
+        # Use record_id for the base get method
+        invitation = await self.get(db, record_id=invitation_id)
 
         if not invitation:
+            logger.warning(f"Attempted to revoke non-existent invitation: {invitation_id}")
             return None
 
-        # Update invitation status
-        invitation.status = InvitationStatus.REVOKED
+        # Check if already revoked or expired or accepted
+        if invitation.status != InvitationStatus.PENDING:
+            logger.warning(
+                f"Attempted to revoke invitation {invitation_id} which is already in status: {invitation.status}"
+            )
+            # Return the invitation as is, as it's not pending anymore
+            return invitation
 
+        # Update status to REVOKED
+        invitation.status = InvitationStatus.REVOKED
         await db.commit()
         await db.refresh(invitation)
 
+        logger.info(f"Invitation {invitation_id} revoked successfully.")
         return invitation
 
     async def get_invitation_with_details(
         self, db: AsyncSession, *, invitation_id: UUID
     ) -> Optional[dict[str, Any]]:
-        """Get an invitation with tenant and inviter details.
-
-        Args:
-            db: Database session
-            invitation_id: Invitation ID
-
-        Returns:
-            Invitation with details or None
-        """
-        invitation = await self.get(db, id=invitation_id)
-
+        """Get invitation details including related tenant and inviter info."""
+        # TODO: Optimize this query if needed, potentially joining tables
+        # Use the correct argument name 'record_id' for the base get method
+        invitation = await self.get(db, record_id=invitation_id)
         if not invitation:
             return None
 
+        # Fetch related objects (assuming eager loading isn't configured or needed)
         # Get tenant and inviter details
         tenant_stmt = select(Tenant).where(Tenant.id == invitation.tenant_id)
         tenant_result = await db.execute(tenant_stmt)
@@ -269,6 +313,34 @@ class InvitationService(CRUDBase[Invitation, dict[str, Any], dict[str, Any]]):
             URL for the invitation
         """
         return f"{settings.FRONTEND_URL}/accept-invitation?token={token}"
+
+    # TODO: Implement get_multi_by_tenant method
+    async def get_multi_by_tenant(
+        self, db: AsyncSession, *, tenant_id: UUID, skip: int = 0, limit: int = 100
+    ) -> list[Invitation]:
+        """Get multiple invitations for a specific tenant.
+
+        Args:
+            db: Database session
+            tenant_id: Tenant ID
+            skip: Number of records to skip
+            limit: Maximum number of records to return
+
+        Returns:
+            List of invitations for the tenant.
+        """
+        logger.debug(f"Fetching invitations for tenant_id={tenant_id} with skip={skip}, limit={limit}")
+        stmt = (
+            select(self.model)
+            .where(self.model.tenant_id == tenant_id)
+            .order_by(self.model.created_at.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        result = await db.execute(stmt)
+        invitations = list(result.scalars().all())
+        logger.debug(f"Found {len(invitations)} invitations for tenant_id={tenant_id}")
+        return invitations
 
 
 # Create a singleton instance

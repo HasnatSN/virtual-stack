@@ -6,35 +6,57 @@ from virtualstack.api.v1.endpoints import ( # noqa: F401
     invitations,
     roles,
     tenants,
-    users,
-    tenant_user_management, # Add the new router
-    tenant_header_roles, # Add the new tenant header-based roles router
-    tenant_header_users, # Add the new tenant header-based users router
+    users, # Keep import for now, might need /users/me later
+    tenant_user_management,
 )
 
 
 api_router = APIRouter()
 
-# Include authentication endpoints
+# === Global Endpoints ===
+
+# Authentication (not tenant-specific)
 api_router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 
-# Include user management endpoints with header-based tenant context (for frontend MVP)
-api_router.include_router(tenant_header_users.router, prefix="/users", tags=["Users"])
+# Current User Info (not tenant-specific)
+# TODO: Decide if /users/me should remain top-level or move elsewhere.
+# Keep users.router included ONLY for /me for now.
+api_router.include_router(users.router, prefix="/users", tags=["Users (Self)"])
 
-# Include tenant management endpoints
-api_router.include_router(tenants.router, prefix="/tenants", tags=["Tenants"])
+# Tenant Listing (accessible by user, not specific tenant context)
+api_router.include_router(tenants.router, prefix="/tenants", tags=["Tenants (Global)"])
 
-# Include API key management endpoints
+# API Key Management (assuming global for user for now)
+# TODO: Confirm if API Keys should be tenant-scoped?
 api_router.include_router(api_keys.router, prefix="/api-keys", tags=["API Keys"])
 
-# Include roles endpoints with header-based tenant context (for frontend MVP)
-api_router.include_router(tenant_header_roles.router, prefix="/roles", tags=["Roles"])
+# Invitation Management (potentially global or needs tenant scoping review)
+# TODO: Review invitation scoping.
+api_router.include_router(invitations.router, prefix="/invitations", tags=["Invitations"])
 
-# Include invitation management endpoints
-api_router.include_router(invitations.router, prefix="/invitations", tags=["Invitations"]) # Re-enabled invitations router
+# Global Permissions List
+# TODO: Move the GET /permissions endpoint to a dedicated permissions router?
+# For now, it's included via the tenant-scoped roles router below, which is confusing.
 
-# LEGACY/DEPRECATED ENDPOINTS WITH PATH-BASED TENANT CONTEXT
-# These will be removed in future versions - prefer the header-based tenant context endpoints
-# Include the new router - note the prefix is different as tenant_id is part of the path
-api_router.include_router(tenant_user_management.router, prefix="/tenants/{tenant_id}/users", tags=["Tenant User Management"])
-api_router.include_router(roles.router, prefix="/tenants/{tenant_id}/roles", tags=["Tenant Role Management"])
+# === Tenant-Scoped Endpoints ===
+
+# Mount user management endpoints under tenant context
+# This now includes list, create, get, update, delete for users within a tenant
+api_router.include_router(
+    tenant_user_management.router, # Assuming list users etc. are moved here
+    prefix="/tenants/{tenant_id}/users",
+    tags=["Tenant User Management"]
+)
+
+# Mount role management endpoints under tenant context
+# This includes list, create, get, update, delete roles within a tenant,
+# role assignment, and the global permission list (which should move).
+api_router.include_router(
+    roles.router,
+    prefix="/tenants/{tenant_id}/roles",
+    tags=["Tenant Role Management"]
+)
+
+# Removed duplicate/incorrect mountings:
+# api_router.include_router(users.router, prefix="/users", tags=["Users"]) # Removed global user management
+# api_router.include_router(roles.router, prefix="/roles", tags=["Roles"]) # Removed global role management

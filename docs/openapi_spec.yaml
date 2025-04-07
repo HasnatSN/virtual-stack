@@ -1,0 +1,2077 @@
+openapi: 3.1.0
+info:
+  title: VirtualStack API
+  description: VirtualStack API - Multi-tenant cloud management platform
+  version: 0.1.0
+paths:
+  /:
+    get:
+      summary: Root
+      description: Root endpoint for health checks.
+      operationId: root__get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /health:
+    get:
+      summary: Health Check
+      description: Health check endpoint.
+      operationId: health_check_health_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /api/v1/auth/login/access-token:
+    post:
+      tags:
+      - Authentication
+      summary: Login Access Token
+      description: |-
+        OAuth2 compatible token login, get an access token for future requests.
+        Uses username from the form data as email.
+      operationId: login_access_token_api_v1_auth_login_access_token_post
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Body_login_access_token_api_v1_auth_login_access_token_post'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Token'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/auth/login:
+    post:
+      tags:
+      - Authentication
+      summary: Login
+      description: Login with email and password.
+      operationId: login_api_v1_auth_login_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Token'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/users/:
+    get:
+      tags:
+      - Users
+      summary: Get Users
+      description: Retrieve users.
+      operationId: get_users_api_v1_users__get
+      parameters:
+      - name: skip
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+          title: Skip
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 100
+          title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/User'
+                title: Response Get Users Api V1 Users  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - Users
+      summary: Create User
+      description: Create a new user.
+      operationId: create_user_api_v1_users__post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/users/me:
+    get:
+      tags:
+      - Users
+      summary: Get Current User Info
+      description: Get current user information.
+      operationId: get_current_user_info_api_v1_users_me_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+      security:
+      - OAuth2PasswordBearer: []
+      - APIKeyHeader: []
+      - APIKeyQuery: []
+    put:
+      tags:
+      - Users
+      summary: Update Current User
+      description: Update current user information.
+      operationId: update_current_user_api_v1_users_me_put
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserUpdate'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - OAuth2PasswordBearer: []
+      - APIKeyHeader: []
+      - APIKeyQuery: []
+  /api/v1/users/{user_id}:
+    get:
+      tags:
+      - Users
+      summary: Get User By Id
+      description: Get user by ID.
+      operationId: get_user_by_id_api_v1_users__user_id__get
+      parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: User Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    put:
+      tags:
+      - Users
+      summary: Update User
+      description: Update user information.
+      operationId: update_user_api_v1_users__user_id__put
+      parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: User Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - Users
+      summary: Delete User
+      description: Delete a user.
+      operationId: delete_user_api_v1_users__user_id__delete
+      security:
+      - OAuth2PasswordBearer: []
+      - APIKeyHeader: []
+      - APIKeyQuery: []
+      parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: User Id
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/tenants/:
+    get:
+      tags:
+      - Tenants
+      summary: Get Tenants
+      description: Retrieve tenants.
+      operationId: get_tenants_api_v1_tenants__get
+      parameters:
+      - name: skip
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+          title: Skip
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 100
+          title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Tenant'
+                title: Response Get Tenants Api V1 Tenants  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - Tenants
+      summary: Create Tenant
+      description: Create a new tenant.
+      operationId: create_tenant_api_v1_tenants__post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TenantCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/tenants/{tenant_id}:
+    get:
+      tags:
+      - Tenants
+      summary: Get Tenant By Id
+      description: Get tenant by ID.
+      operationId: get_tenant_by_id_api_v1_tenants__tenant_id__get
+      parameters:
+      - name: tenant_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Tenant Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    put:
+      tags:
+      - Tenants
+      summary: Update Tenant
+      description: Update tenant information.
+      operationId: update_tenant_api_v1_tenants__tenant_id__put
+      parameters:
+      - name: tenant_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Tenant Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TenantUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - Tenants
+      summary: Delete Tenant
+      description: Delete a tenant.
+      operationId: delete_tenant_api_v1_tenants__tenant_id__delete
+      parameters:
+      - name: tenant_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Tenant Id
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/tenants/slug/{slug}:
+    get:
+      tags:
+      - Tenants
+      summary: Get Tenant By Slug
+      description: Get tenant by slug.
+      operationId: get_tenant_by_slug_api_v1_tenants_slug__slug__get
+      parameters:
+      - name: slug
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Slug
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/api-keys/:
+    post:
+      tags:
+      - API Keys
+      summary: Create Api Key
+      description: |-
+        Create a new API key.
+
+        - If a tenant ID is provided, validates that the user has access to that tenant
+        - Returns the full API key value which will not be available again
+      operationId: create_api_key_api_v1_api_keys__post
+      security:
+      - OAuth2PasswordBearer: []
+      - APIKeyHeader: []
+      - APIKeyQuery: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/APIKeyCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIKeyWithValue'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - API Keys
+      summary: Read Api Keys
+      description: |-
+        Retrieve API keys.
+
+        - Regular users can only see their own API keys
+        - Superusers can see all API keys
+        - Can filter by tenant_id
+      operationId: read_api_keys_api_v1_api_keys__get
+      security:
+      - OAuth2PasswordBearer: []
+      - APIKeyHeader: []
+      - APIKeyQuery: []
+      parameters:
+      - name: skip
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 0
+          title: Skip
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 100
+          title: Limit
+      - name: tenant_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Tenant Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/APIKey'
+                title: Response Read Api Keys Api V1 Api Keys  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/api-keys/{api_key_id}:
+    get:
+      tags:
+      - API Keys
+      summary: Read Api Key
+      description: |-
+        Get a specific API key by ID.
+
+        - Regular users can only access their own API keys
+        - Superusers can access any API key
+      operationId: read_api_key_api_v1_api_keys__api_key_id__get
+      security:
+      - OAuth2PasswordBearer: []
+      - APIKeyHeader: []
+      - APIKeyQuery: []
+      parameters:
+      - name: api_key_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Api Key Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIKey'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    put:
+      tags:
+      - API Keys
+      summary: Update Api Key
+      description: |-
+        Update an API key.
+
+        - Regular users can only update their own API keys
+        - Superusers can update any API key
+      operationId: update_api_key_api_v1_api_keys__api_key_id__put
+      security:
+      - OAuth2PasswordBearer: []
+      - APIKeyHeader: []
+      - APIKeyQuery: []
+      parameters:
+      - name: api_key_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Api Key Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/APIKeyUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIKey'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - API Keys
+      summary: Delete Api Key
+      description: |-
+        Delete an API key.
+
+        - Regular users can only delete their own API keys
+        - Superusers can delete any API key
+      operationId: delete_api_key_api_v1_api_keys__api_key_id__delete
+      security:
+      - OAuth2PasswordBearer: []
+      - APIKeyHeader: []
+      - APIKeyQuery: []
+      parameters:
+      - name: api_key_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Api Key Id
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/roles/:
+    get:
+      tags:
+      - Roles
+      summary: List Roles
+      description: List globally defined roles.
+      operationId: list_roles_api_v1_roles__get
+      security:
+      - OAuth2PasswordBearer: []
+      - APIKeyHeader: []
+      - APIKeyQuery: []
+      parameters:
+      - name: skip
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 0
+          title: Skip
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 100
+          title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Role'
+                title: Response List Roles Api V1 Roles  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - Roles
+      summary: Create Role
+      description: Create a new global role definition.
+      operationId: create_role_api_v1_roles__post
+      security:
+      - OAuth2PasswordBearer: []
+      - APIKeyHeader: []
+      - APIKeyQuery: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoleCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/roles/{role_id}:
+    get:
+      tags:
+      - Roles
+      summary: Get Role
+      description: Get details for a specific role definition.
+      operationId: get_role_api_v1_roles__role_id__get
+      security:
+      - OAuth2PasswordBearer: []
+      - APIKeyHeader: []
+      - APIKeyQuery: []
+      parameters:
+      - name: role_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Role Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    put:
+      tags:
+      - Roles
+      summary: Update Role
+      description: Update a role definition.
+      operationId: update_role_api_v1_roles__role_id__put
+      security:
+      - OAuth2PasswordBearer: []
+      - APIKeyHeader: []
+      - APIKeyQuery: []
+      parameters:
+      - name: role_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Role Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoleUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - Roles
+      summary: Delete Role
+      description: Delete a role definition.
+      operationId: delete_role_api_v1_roles__role_id__delete
+      security:
+      - OAuth2PasswordBearer: []
+      - APIKeyHeader: []
+      - APIKeyQuery: []
+      parameters:
+      - name: role_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Role Id
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/roles/{role_id}/permissions:
+    get:
+      tags:
+      - Roles
+      summary: List Role Permissions
+      description: List all permissions associated with a specific role.
+      operationId: list_role_permissions_api_v1_roles__role_id__permissions_get
+      security:
+      - OAuth2PasswordBearer: []
+      - APIKeyHeader: []
+      - APIKeyQuery: []
+      parameters:
+      - name: role_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Role Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Permission'
+                title: Response List Role Permissions Api V1 Roles  Role Id  Permissions
+                  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - Roles
+      summary: Add Permission To Role
+      description: Assign a permission to a role.
+      operationId: add_permission_to_role_api_v1_roles__role_id__permissions_post
+      security:
+      - OAuth2PasswordBearer: []
+      - APIKeyHeader: []
+      - APIKeyQuery: []
+      parameters:
+      - name: role_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Role Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PermissionAssign'
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/roles/{role_id}/permissions/{permission_id}:
+    delete:
+      tags:
+      - Roles
+      summary: Remove Permission From Role
+      description: Remove a permission assignment from a role.
+      operationId: remove_permission_from_role_api_v1_roles__role_id__permissions__permission_id__delete
+      security:
+      - OAuth2PasswordBearer: []
+      - APIKeyHeader: []
+      - APIKeyQuery: []
+      parameters:
+      - name: role_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Role Id
+      - name: permission_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Permission Id
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/tenants/{tenant_id}/users/:
+    get:
+      tags:
+      - Tenant User Management
+      summary: List Users In Tenant
+      description: List users associated with a specific tenant.
+      operationId: list_users_in_tenant_api_v1_tenants__tenant_id__users__get
+      security:
+      - OAuth2PasswordBearer: []
+      - APIKeyHeader: []
+      - APIKeyQuery: []
+      parameters:
+      - name: tenant_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Tenant Id
+      - name: skip
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+          title: Skip
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 100
+          title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/User'
+                title: Response List Users In Tenant Api V1 Tenants  Tenant Id  Users  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/tenants/{tenant_id}/users/{user_id}:
+    get:
+      tags:
+      - Tenant User Management
+      summary: Get Tenant User
+      description: Get details for a specific user within a tenant.
+      operationId: get_tenant_user_api_v1_tenants__tenant_id__users__user_id__get
+      security:
+      - OAuth2PasswordBearer: []
+      - APIKeyHeader: []
+      - APIKeyQuery: []
+      parameters:
+      - name: tenant_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Tenant Id
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: User Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/tenants/{tenant_id}/users/{user_id}/roles:
+    post:
+      tags:
+      - Tenant User Management
+      summary: Assign Role To User
+      description: Assign a role to a user within a specific tenant.
+      operationId: assign_role_to_user_api_v1_tenants__tenant_id__users__user_id__roles_post
+      security:
+      - OAuth2PasswordBearer: []
+      - APIKeyHeader: []
+      - APIKeyQuery: []
+      parameters:
+      - name: tenant_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Tenant Id
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: User Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoleAssign'
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/tenants/{tenant_id}/users/{user_id}/roles/{role_id}:
+    delete:
+      tags:
+      - Tenant User Management
+      summary: Remove Role From User
+      description: Remove a specific role assignment from a user within a tenant.
+      operationId: remove_role_from_user_api_v1_tenants__tenant_id__users__user_id__roles__role_id__delete
+      security:
+      - OAuth2PasswordBearer: []
+      - APIKeyHeader: []
+      - APIKeyQuery: []
+      parameters:
+      - name: tenant_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Tenant Id
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: User Id
+      - name: role_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Role Id
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/tenants/{tenant_id}/roles/:
+    get:
+      tags:
+      - Tenant Role Management
+      summary: List Roles
+      description: List globally defined roles.
+      operationId: list_roles_api_v1_tenants__tenant_id__roles__get
+      security:
+      - OAuth2PasswordBearer: []
+      - APIKeyHeader: []
+      - APIKeyQuery: []
+      parameters:
+      - name: skip
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 0
+          title: Skip
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 100
+          title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Role'
+                title: Response List Roles Api V1 Tenants  Tenant Id  Roles  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - Tenant Role Management
+      summary: Create Role
+      description: Create a new global role definition.
+      operationId: create_role_api_v1_tenants__tenant_id__roles__post
+      security:
+      - OAuth2PasswordBearer: []
+      - APIKeyHeader: []
+      - APIKeyQuery: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoleCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/tenants/{tenant_id}/roles/{role_id}:
+    get:
+      tags:
+      - Tenant Role Management
+      summary: Get Role
+      description: Get details for a specific role definition.
+      operationId: get_role_api_v1_tenants__tenant_id__roles__role_id__get
+      security:
+      - OAuth2PasswordBearer: []
+      - APIKeyHeader: []
+      - APIKeyQuery: []
+      parameters:
+      - name: role_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Role Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    put:
+      tags:
+      - Tenant Role Management
+      summary: Update Role
+      description: Update a role definition.
+      operationId: update_role_api_v1_tenants__tenant_id__roles__role_id__put
+      security:
+      - OAuth2PasswordBearer: []
+      - APIKeyHeader: []
+      - APIKeyQuery: []
+      parameters:
+      - name: role_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Role Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoleUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - Tenant Role Management
+      summary: Delete Role
+      description: Delete a role definition.
+      operationId: delete_role_api_v1_tenants__tenant_id__roles__role_id__delete
+      security:
+      - OAuth2PasswordBearer: []
+      - APIKeyHeader: []
+      - APIKeyQuery: []
+      parameters:
+      - name: role_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Role Id
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/tenants/{tenant_id}/roles/{role_id}/permissions:
+    get:
+      tags:
+      - Tenant Role Management
+      summary: List Role Permissions
+      description: List all permissions associated with a specific role.
+      operationId: list_role_permissions_api_v1_tenants__tenant_id__roles__role_id__permissions_get
+      security:
+      - OAuth2PasswordBearer: []
+      - APIKeyHeader: []
+      - APIKeyQuery: []
+      parameters:
+      - name: role_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Role Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Permission'
+                title: Response List Role Permissions Api V1 Tenants  Tenant Id  Roles  Role
+                  Id  Permissions Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    post:
+      tags:
+      - Tenant Role Management
+      summary: Add Permission To Role
+      description: Assign a permission to a role.
+      operationId: add_permission_to_role_api_v1_tenants__tenant_id__roles__role_id__permissions_post
+      security:
+      - OAuth2PasswordBearer: []
+      - APIKeyHeader: []
+      - APIKeyQuery: []
+      parameters:
+      - name: role_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Role Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PermissionAssign'
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/tenants/{tenant_id}/roles/{role_id}/permissions/{permission_id}:
+    delete:
+      tags:
+      - Tenant Role Management
+      summary: Remove Permission From Role
+      description: Remove a permission assignment from a role.
+      operationId: remove_permission_from_role_api_v1_tenants__tenant_id__roles__role_id__permissions__permission_id__delete
+      security:
+      - OAuth2PasswordBearer: []
+      - APIKeyHeader: []
+      - APIKeyQuery: []
+      parameters:
+      - name: role_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Role Id
+      - name: permission_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Permission Id
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+components:
+  schemas:
+    APIKey:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Name of the API key
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+          description: Optional description
+        is_active:
+          type: boolean
+          title: Is Active
+          description: Whether the API key is active
+          default: true
+        expires_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Expires At
+          description: Expiration date (null for no expiration)
+        scope:
+          $ref: '#/components/schemas/APIKeyScope'
+          description: Scope of the API key
+          default: TENANT
+        tenant_id:
+          anyOf:
+          - type: string
+            format: uuid4
+          - type: 'null'
+          title: Tenant Id
+          description: Tenant ID if scope is tenant-specific
+        id:
+          type: string
+          format: uuid4
+          title: Id
+        key_prefix:
+          type: string
+          title: Key Prefix
+          description: First few characters of the key
+        user_id:
+          type: string
+          format: uuid4
+          title: User Id
+          description: ID of the user who created the key
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Updated At
+        last_used_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Last Used At
+      type: object
+      required:
+      - name
+      - id
+      - key_prefix
+      - user_id
+      - created_at
+      title: APIKey
+      description: Schema for returning an API key (without the key value).
+    APIKeyCreate:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Name of the API key
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+          description: Optional description
+        is_active:
+          type: boolean
+          title: Is Active
+          description: Whether the API key is active
+          default: true
+        expires_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Expires At
+          description: Expiration date (null for no expiration)
+        scope:
+          $ref: '#/components/schemas/APIKeyScope'
+          description: Scope of the API key
+          default: TENANT
+        tenant_id:
+          anyOf:
+          - type: string
+            format: uuid4
+          - type: 'null'
+          title: Tenant Id
+          description: Tenant ID if scope is tenant-specific
+      type: object
+      required:
+      - name
+      title: APIKeyCreate
+      description: Schema for creating a new API key.
+    APIKeyScope:
+      type: string
+      enum:
+      - GLOBAL
+      - TENANT
+      title: APIKeyScope
+      description: Enum for API key scope types.
+    APIKeyUpdate:
+      properties:
+        name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Name
+          description: Name of the API key
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+          description: Optional description
+        is_active:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Active
+          description: Whether the API key is active
+        expires_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Expires At
+          description: Expiration date (null for no expiration)
+      type: object
+      title: APIKeyUpdate
+      description: Schema for updating an API key.
+    APIKeyWithValue:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Name of the API key
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+          description: Optional description
+        is_active:
+          type: boolean
+          title: Is Active
+          description: Whether the API key is active
+          default: true
+        expires_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Expires At
+          description: Expiration date (null for no expiration)
+        scope:
+          $ref: '#/components/schemas/APIKeyScope'
+          description: Scope of the API key
+          default: TENANT
+        tenant_id:
+          anyOf:
+          - type: string
+            format: uuid4
+          - type: 'null'
+          title: Tenant Id
+          description: Tenant ID if scope is tenant-specific
+        id:
+          type: string
+          format: uuid4
+          title: Id
+        key_prefix:
+          type: string
+          title: Key Prefix
+          description: First few characters of the key
+        user_id:
+          type: string
+          format: uuid4
+          title: User Id
+          description: ID of the user who created the key
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Updated At
+        last_used_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Last Used At
+        key:
+          type: string
+          title: Key
+          description: The full API key value (only returned on creation)
+      type: object
+      required:
+      - name
+      - id
+      - key_prefix
+      - user_id
+      - created_at
+      - key
+      title: APIKeyWithValue
+      description: |-
+        Schema for returning a newly created API key with its full value.
+        This is returned only once when the key is created.
+    Body_login_access_token_api_v1_auth_login_access_token_post:
+      properties:
+        grant_type:
+          anyOf:
+          - type: string
+            pattern: password
+          - type: 'null'
+          title: Grant Type
+        username:
+          type: string
+          title: Username
+        password:
+          type: string
+          title: Password
+        scope:
+          type: string
+          title: Scope
+          default: ''
+        client_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Client Id
+        client_secret:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Client Secret
+      type: object
+      required:
+      - username
+      - password
+      title: Body_login_access_token_api_v1_auth_login_access_token_post
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    LoginRequest:
+      properties:
+        email:
+          type: string
+          format: email
+          title: Email
+          description: User email address
+        password:
+          type: string
+          title: Password
+          description: User password
+      type: object
+      required:
+      - email
+      - password
+      title: LoginRequest
+      description: Schema for login requests.
+    Permission:
+      properties:
+        name:
+          type: string
+          title: Name
+        code:
+          type: string
+          title: Code
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        id:
+          type: string
+          format: uuid
+          title: Id
+      type: object
+      required:
+      - name
+      - code
+      - id
+      title: Permission
+    PermissionAssign:
+      properties:
+        permission_id:
+          type: string
+          format: uuid
+          title: Permission Id
+      type: object
+      required:
+      - permission_id
+      title: PermissionAssign
+    Role:
+      properties:
+        name:
+          type: string
+          title: Name
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        tenant_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Tenant Id
+        is_system_role:
+          type: boolean
+          title: Is System Role
+          default: false
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+          description: Creation timestamp
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+          description: Last update timestamp
+        id:
+          type: string
+          format: uuid
+          title: Id
+          description: Unique identifier
+        permissions:
+          items:
+            type: string
+          type: array
+          title: Permissions
+          default: []
+      type: object
+      required:
+      - name
+      - created_at
+      - updated_at
+      - id
+      title: Role
+      description: Schema for returning Role data via the API.
+    RoleAssign:
+      properties:
+        role_id:
+          type: string
+          format: uuid
+          title: Role Id
+      type: object
+      required:
+      - role_id
+      title: RoleAssign
+      description: Schema used when assigning a Role to a user (expects role_id).
+    RoleCreate:
+      properties:
+        name:
+          type: string
+          title: Name
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        tenant_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Tenant Id
+        is_system_role:
+          type: boolean
+          title: Is System Role
+          default: false
+      type: object
+      required:
+      - name
+      title: RoleCreate
+      description: Schema used for creating a new Role via the API.
+    RoleUpdate:
+      properties:
+        name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Name
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        tenant_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Tenant Id
+        is_system_role:
+          type: boolean
+          title: Is System Role
+          default: false
+      type: object
+      title: RoleUpdate
+      description: Schema used for updating an existing Role via the API.
+    Tenant:
+      properties:
+        name:
+          type: string
+          title: Name
+        slug:
+          type: string
+          maxLength: 50
+          minLength: 3
+          pattern: "^[a-z0-9-]+$"
+          title: Slug
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        is_active:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Active
+          default: true
+        id:
+          type: string
+          format: uuid4
+          title: Id
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Updated At
+      type: object
+      required:
+      - name
+      - slug
+      - id
+      - created_at
+      title: Tenant
+      description: Schema for returning a tenant, which includes the ID and timestamps.
+    TenantCreate:
+      properties:
+        name:
+          type: string
+          title: Name
+        slug:
+          type: string
+          maxLength: 50
+          minLength: 3
+          pattern: "^[a-z0-9-]+$"
+          title: Slug
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        is_active:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Active
+          default: true
+      type: object
+      required:
+      - name
+      - slug
+      title: TenantCreate
+      description: Schema for creating a new tenant.
+    TenantUpdate:
+      properties:
+        name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Name
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        is_active:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Active
+      type: object
+      title: TenantUpdate
+      description: Schema for updating a tenant, where all fields are optional.
+    Token:
+      properties:
+        access_token:
+          type: string
+          title: Access Token
+          description: JWT access token
+        token_type:
+          type: string
+          title: Token Type
+          description: Token type
+      type: object
+      required:
+      - access_token
+      - token_type
+      title: Token
+      description: Schema for authentication tokens.
+    User:
+      properties:
+        email:
+          type: string
+          format: email
+          title: Email
+        first_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: First Name
+        last_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Last Name
+        is_active:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Active
+          default: true
+        is_superuser:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Superuser
+          default: false
+        id:
+          type: string
+          format: uuid4
+          title: Id
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Updated At
+      type: object
+      required:
+      - email
+      - id
+      - created_at
+      title: User
+      description: Schema for returning a user, which includes the ID and timestamps.
+    UserCreate:
+      properties:
+        email:
+          type: string
+          format: email
+          title: Email
+        first_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: First Name
+        last_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Last Name
+        is_active:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Active
+          default: true
+        is_superuser:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Superuser
+          default: false
+        password:
+          type: string
+          minLength: 8
+          title: Password
+      type: object
+      required:
+      - email
+      - password
+      title: UserCreate
+      description: Schema for creating a new user, which includes the password.
+    UserUpdate:
+      properties:
+        email:
+          anyOf:
+          - type: string
+            format: email
+          - type: 'null'
+          title: Email
+        first_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: First Name
+        last_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Last Name
+        password:
+          anyOf:
+          - type: string
+            minLength: 8
+          - type: 'null'
+          title: Password
+        is_active:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Active
+        is_superuser:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Is Superuser
+      type: object
+      title: UserUpdate
+      description: Schema for updating a user, where all fields are optional.
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+  securitySchemes:
+    OAuth2PasswordBearer:
+      type: oauth2
+      flows:
+        password:
+          scopes: {}
+          tokenUrl: /api/v1/auth/login/access-token
+    APIKeyHeader:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    APIKeyQuery:
+      type: apiKey
+      in: query
+      name: api_key
+
+</rewritten_file> 

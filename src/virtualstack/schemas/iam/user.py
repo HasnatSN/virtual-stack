@@ -39,3 +39,12 @@ class User(UserBase):
     updated_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# TODO: Consider adding Role info to User schema or UserListResponse items if needed by FE
+class UserListResponse(BaseModel):
+    """Response schema for paginated list of users."""
+    items: list[User]
+    total: int
+    page: int
+    limit: int

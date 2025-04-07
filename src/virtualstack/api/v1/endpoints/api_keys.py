@@ -1,6 +1,7 @@
 import logging
 from typing import Optional, Any
 from uuid import UUID
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -115,23 +116,26 @@ async def read_api_keys(
     - Superusers can see all API keys
     - Can filter by tenant_id
     """
+    # Fetch API keys based on user permissions and filters
     if current_user.is_superuser:
         if tenant_id:
-            api_keys = await api_key_service.get_multi_by_tenant(
+            orm_keys = await api_key_service.get_multi_by_tenant(
                 db=db, tenant_id=tenant_id, skip=skip, limit=limit
             )
         else:
-            api_keys = await api_key_service.get_multi(db=db, skip=skip, limit=limit)
+            orm_keys = await api_key_service.get_multi(db=db, skip=skip, limit=limit)
     else:
-        api_keys = await api_key_service.get_multi_by_user(
+        orm_keys = await api_key_service.get_multi_by_user(
             db=db, user_id=current_user.id, skip=skip, limit=limit
         )
-
-        # Filter by tenant_id if requested
+        # Post-filter by tenant_id if needed for non-superusers
         if tenant_id:
-            api_keys = [key for key in api_keys if key.tenant_id == tenant_id]
+            orm_keys = [key for key in orm_keys if key.tenant_id == tenant_id]
 
-    return api_keys
+    # Log just before returning ORM objects to let FastAPI handle serialization
+    for key in orm_keys:
+        logger.debug(f"API Key ORM object before serialization: ID={key.id}, created_at={key.created_at}, Type={type(key.created_at)}")
+    return orm_keys
 
 
 @router.get("/{api_key_id}", response_model=APIKey)

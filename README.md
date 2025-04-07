@@ -79,21 +79,21 @@ A multi-tenant cloud management platform backend service built with FastAPI, fol
 5. Run database migrations:
    ```bash
    # Ensure your .env file points to the Docker PostgreSQL instance
-   python3 -m alembic upgrade head
+   poetry run alembic upgrade head
    ```
 
 6. Start the development server:
    ```bash
-   python3 -m uvicorn src.virtualstack.main:app --reload --host 0.0.0.0 --port 8000
+   poetry run uvicorn src.virtualstack.main:app --reload --host 0.0.0.0 --port 8000
    ```
 
 ## Development
 
-- Run tests: `python3 -m pytest`
-- Check for issues (linting, formatting, etc.): `python3 -m ruff check .`
-- Fix fixable issues: `python3 -m ruff check . --fix`
-- Format code: `python3 -m ruff format .`
-- Type checking: `python3 -m mypy src/`
+- Run tests: `poetry run pytest`
+- Check for issues (linting, formatting, etc.): `poetry run ruff check .`
+- Fix fixable issues: `poetry run ruff check . --fix`
+- Format code: `poetry run ruff format .`
+- Type checking: `poetry run mypy src/`
 
 ## Code Quality
 
@@ -157,4 +157,4 @@ virtualstack-backend/
 
 ## License
 
-[Specify License - e.g., MIT, Apache 2.0] 
+[Specify License - e.g., MIT, Apache 2.0]

@@ -18,7 +18,7 @@ from .iam.invitation import (
     InvitationTokenResponse,
 )
 from .iam import Invitation
-from .iam.role import Role, RoleBase, RoleCreate, RoleUpdate, RoleWithPermissions
+from .iam.role import Role, RoleBase, RoleCreate, RoleUpdate, RoleAssign
 from .iam.tenant import Tenant, TenantBase, TenantCreate, TenantUpdate
 from .iam.user import User, UserBase, UserCreate, UserUpdate
 
@@ -51,7 +51,7 @@ __all__ = [
     "RoleCreate",
     "RoleUpdate",
     "RoleBase",
-    "RoleWithPermissions",
+    "RoleAssign",
     # Invitation
     "Invitation",
     "InvitationCreate",

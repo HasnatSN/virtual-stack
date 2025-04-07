@@ -1,10 +1,10 @@
 from enum import Enum
-from typing import Optional
+from typing import Optional, List
 from uuid import UUID
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from virtualstack.services.iam import role_service, user_service
+# Removed service imports to break cycle
+# from sqlalchemy.ext.asyncio import AsyncSession
+# from virtualstack.services.iam import role_service, user_service
 
 
 class Permission(str, Enum):
@@ -42,14 +42,30 @@ class Permission(str, Enum):
     ROLE_CREATE = "role:create"
     ROLE_UPDATE = "role:update"
     ROLE_DELETE = "role:delete"
-    ROLE_ASSIGN = "role:assign"
+    # Permission to assign/remove roles TO users within a tenant
+    ROLE_ASSIGN_USERS = "role:assign_users"
+    # TODO: Revisit ROLE_ASSIGN - is it for assigning roles to users, or assigning permissions to roles?
+    ROLE_ASSIGN = "role:assign" # Keep for now, potentially remove/rename later
 
     # Permission permissions (meta!)
     PERMISSION_READ = "permission:read"
+    # Permission to assign/remove permissions FROM roles
     PERMISSION_ASSIGN = "permission:assign"
+
+    # Tenant Role Management
+    TENANT_MANAGE_ROLES = "tenant:manage_roles"
+    TENANT_VIEW_ROLES = "tenant:view_roles"
+    TENANT_MANAGE_ROLE_PERMISSIONS = "tenant:manage_role_permissions"
+
+    # Tenant User Management
+    TENANT_VIEW_USERS = "tenant:view_users"
+
+    # Invitation Management (Example)
+    TENANT_MANAGE_INVITATIONS = "tenant:manage_invitations"
 
 
 # Built-in roles with their permissions
+# This dictionary definition itself doesn't require service imports
 ROLE_PERMISSIONS = {
     "admin": set(Permission),  # Admin has all permissions
     "tenant_admin": {
@@ -117,79 +133,29 @@ ROLE_PERMISSIONS = {
 }
 
 
-async def get_user_permissions(
-    db: AsyncSession, user_id: UUID, tenant_id: Optional[UUID] = None
-) -> set[Permission]:
-    """Get permissions for a user, optionally scoped to a specific tenant.
+# --- Helper functions removed/commented out to break import cycle --- 
+# --- These need to be moved to appropriate service files or a utils module --- 
 
-    Args:
-        db: Database session
-        user_id: User ID
-        tenant_id: Optional tenant ID to scope permissions
-
-    Returns:
-        Set of permissions
-    """
-    # Get the user
-    user = await user_service.get(db, id=user_id)
-
-    if not user:
-        return set()
-
-    # Superusers have all permissions
-    if user.is_superuser:
-        return set(Permission)
-
-    # Get the user's roles for the specified tenant
-    roles = await role_service.get_user_roles(db, user_id=user_id, tenant_id=tenant_id)
-
-    # Get permissions for each role and combine them
-    all_permissions = set()
-    for role in roles:
-        role_permissions = await role_service.get_role_permissions(db, role_id=role.id)
-        all_permissions.update([Permission(p.name) for p in role_permissions])
-
-    return all_permissions
-
-
-def has_permission(user_permissions: set[Permission], required_permission: Permission) -> bool:
-    """Check if user has a specific permission.
-
-    Args:
-        user_permissions: Set of user's permissions
-        required_permission: Permission to check
-
-    Returns:
-        True if user has the permission, False otherwise
-    """
-    return required_permission in user_permissions
-
-
-def has_any_permission(
-    user_permissions: set[Permission], required_permissions: list[Permission]
-) -> bool:
-    """Check if user has any of the specified permissions.
-
-    Args:
-        user_permissions: Set of user's permissions
-        required_permissions: List of permissions to check
-
-    Returns:
-        True if user has any of the permissions, False otherwise
-    """
-    return any(perm in user_permissions for perm in required_permissions)
-
-
-def has_all_permissions(
-    user_permissions: set[Permission], required_permissions: list[Permission]
-) -> bool:
-    """Check if user has all of the specified permissions.
-
-    Args:
-        user_permissions: Set of user's permissions
-        required_permissions: List of permissions to check
-
-    Returns:
-        True if user has all of the permissions, False otherwise
-    """
-    return all(perm in user_permissions for perm in required_permissions)
+# async def get_user_permissions(
+#     db: AsyncSession, user_id: UUID, tenant_id: Optional[UUID] = None
+# ) -> set[Permission]:
+#     """Get permissions for a user, optionally scoped to a specific tenant."""
+#     # Requires user_service, role_service
+#     # ... implementation ...
+#     pass
+#
+# def has_permission(user_permissions: set[Permission], required_permission: Permission) -> bool:
+#     """Check if user has a specific permission."""
+#     return required_permission in user_permissions
+#
+# def has_any_permission(
+#     user_permissions: set[Permission], required_permissions: list[Permission]
+# ) -> bool:
+#     """Check if user has any of the specified permissions."""
+#     return any(perm in user_permissions for perm in required_permissions)
+#
+# def has_all_permissions(
+#     user_permissions: set[Permission], required_permissions: list[Permission]
+# ) -> bool:
+#     """Check if user has all of the specified permissions."""
+#     return all(perm in user_permissions for perm in required_permissions)

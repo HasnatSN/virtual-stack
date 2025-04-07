@@ -4,7 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict # Import BaseModel directly
 
 from virtualstack.schemas.base import BaseSchema, IDSchema, TimestampSchema
-# Import Permission schema for RoleDetail
+# Moved import here
 from virtualstack.schemas.iam.permission import Permission as PermissionSchema
 
 
@@ -28,6 +28,12 @@ class RoleUpdate(BaseModel): # Use BaseModel for optional fields
     name: Optional[str] = None
     description: Optional[str] = None
     permission_ids: Optional[List[UUID]] = None # Allow updating permissions
+
+
+# Re-added RoleAssign schema for role assignment endpoint
+class RoleAssign(BaseModel):
+    """Input schema for assigning a role to a user."""
+    role_id: UUID
 
 
 # Removed RoleAssign schema as role assignment is handled by RoleUserAssignment schemas
@@ -61,7 +67,8 @@ class RoleList(BaseModel): # Specific schema for list output
 
 class RoleDetail(Role): # Inherit Role and add detailed permissions
     """Schema for the get role details endpoint output."""
-    # Properly annotate the permissions field
+    # Removed import from here
+    # from virtualstack.schemas.iam.permission import Permission as PermissionSchema
     permissions: List[PermissionSchema] = []
 
 

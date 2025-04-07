@@ -11,6 +11,7 @@ class Permission(Base):
     """Permission model representing a single permission in the system."""
 
     __tablename__ = "permissions"
+    __table_args__ = {"schema": "iam"}
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(255), nullable=False, unique=True)

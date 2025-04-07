@@ -70,11 +70,11 @@ class APIKeyService(CRUDBase[APIKey, APIKeyCreate, APIKeyUpdate]):
         elif obj_in.scope == APIKeyScope.GLOBAL:
             db_obj_data["tenant_id"] = None # Explicitly set to None for GLOBAL scope
 
-        # Handle expires_at: Convert to UTC and make naive if present
+        # Handle expires_at: Store timezone-aware UTC
         if obj_in.expires_at:
-            # Ensure it's UTC, then remove tzinfo for DB storage
-            expires_at_naive = obj_in.expires_at.astimezone(timezone.utc).replace(tzinfo=None)
-            db_obj_data["expires_at"] = expires_at_naive
+            # Ensure it's UTC and keep it timezone-aware
+            expires_at_aware_utc = obj_in.expires_at.astimezone(timezone.utc) # Keep it timezone-aware
+            db_obj_data["expires_at"] = expires_at_aware_utc
         else:
             db_obj_data["expires_at"] = None # Explicitly set to None if not provided
 
@@ -152,10 +152,17 @@ class APIKeyService(CRUDBase[APIKey, APIKeyCreate, APIKeyUpdate]):
         stmt = select(self.model).where(self.model.user_id == user_id).offset(skip).limit(limit)
         result = await db.execute(stmt)
         keys = result.scalars().all()
-        # TODO: Explicitly refresh each object to load server defaults
+        # TODO: Consider if refresh is truly needed or if eager loading options solve it
+        refreshed_keys = []
         for key in keys:
-            await db.refresh(key)
-        return keys
+            try:
+                await db.refresh(key) # Refresh to load potential defaults/latest state
+                refreshed_keys.append(key)
+            except Exception as e:
+                logger.error(f"Failed to refresh API key {key.id} for user {user_id} in service get_multi_by_user: {e}")
+                # Include potentially unrefreshed keys
+                refreshed_keys.append(key)
+        return refreshed_keys
 
     async def get_multi_by_tenant(
         self, db: AsyncSession, *, tenant_id: UUID, skip: int = 0, limit: int = 100
@@ -174,10 +181,17 @@ class APIKeyService(CRUDBase[APIKey, APIKeyCreate, APIKeyUpdate]):
         stmt = select(self.model).where(self.model.tenant_id == tenant_id).offset(skip).limit(limit)
         result = await db.execute(stmt)
         keys = result.scalars().all()
-        # TODO: Explicitly refresh each object to load server defaults
+        # TODO: Consider if refresh is truly needed or if eager loading options solve it
+        refreshed_keys = []
         for key in keys:
-            await db.refresh(key)
-        return keys
+            try:
+                await db.refresh(key) # Refresh to load potential defaults/latest state
+                refreshed_keys.append(key)
+            except Exception as e:
+                logger.error(f"Failed to refresh API key {key.id} for tenant {tenant_id} in service get_multi_by_tenant: {e}")
+                # Include potentially unrefreshed keys
+                refreshed_keys.append(key)
+        return refreshed_keys
 
     async def get_multi(
         self, db: AsyncSession, *, skip: int = 0, limit: int = 100
@@ -186,10 +200,17 @@ class APIKeyService(CRUDBase[APIKey, APIKeyCreate, APIKeyUpdate]):
         stmt = select(self.model).offset(skip).limit(limit)
         result = await db.execute(stmt)
         keys = result.scalars().all()
-        # TODO: Explicitly refresh each object to load server defaults
+        # TODO: Consider if refresh is truly needed or if eager loading options solve it
+        refreshed_keys = []
         for key in keys:
-            await db.refresh(key)
-        return keys
+            try:
+                await db.refresh(key) # Refresh to load potential defaults/latest state
+                refreshed_keys.append(key)
+            except Exception as e:
+                logger.error(f"Failed to refresh API key {key.id} in service get_multi: {e}")
+                # Include potentially unrefreshed keys to see if Pydantic still fails
+                refreshed_keys.append(key)
+        return refreshed_keys
 
     async def update_last_used(self, db: AsyncSession, *, db_obj: APIKey) -> APIKey:
         """Update the last_used_at timestamp of an API key.
@@ -240,17 +261,19 @@ class APIKeyService(CRUDBase[APIKey, APIKeyCreate, APIKeyUpdate]):
             return None
 
         # Check if expired
-        # TODO: DEBUG - Check types before comparison
-        now_utc = datetime.now(timezone.utc)
+        # Use naive UTC datetime for comparison, as DB read seems consistently naive
+        now_naive_utc = datetime.utcnow()
         if db_obj.expires_at:
-            # Make expires_at timezone-aware assuming it's UTC
-            expires_at_aware = db_obj.expires_at.replace(tzinfo=timezone.utc)
-            if expires_at_aware < now_utc:
-                logger.info(f"API key {db_obj.id} validation failed: Expired")
+            # ADDED: Log the retrieved expires_at value and type
+            logger.debug(f"Retrieved expires_at for key {db_obj.id}: {db_obj.expires_at} (Type: {type(db_obj.expires_at)})")
+            # Compare naive db time with naive current time
+            if db_obj.expires_at < now_naive_utc:
+                logger.warning(f"API key {db_obj.id} validation failed: Expired. {db_obj.expires_at} < {now_naive_utc}")
+                logger.warning("--> Expiry check returning None.")
                 return None # Key is expired
 
         # If key is valid and not expired, update last_used_at
-        db_obj.last_used_at = datetime.now(timezone.utc) # Use aware datetime
+        db_obj.last_used_at = datetime.now(timezone.utc) # Still use aware for writing
         db.add(db_obj)
         # We don't commit here; rely on the calling context (e.g., dependency) to handle commit/rollback
         # await db.commit() # REMOVED - Let caller manage transaction

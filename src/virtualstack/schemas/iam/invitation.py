@@ -78,6 +78,7 @@ class InvitationInDBBase(TimestampMixin):
     inviter_id: UUID
     user_id: Optional[UUID] = None
     accepted_at: Optional[datetime] = None
+    role_id: Optional[UUID] = None
 
     # Use ConfigDict for Pydantic V2 compatibility
     model_config = ConfigDict(from_attributes=True)
@@ -85,6 +86,11 @@ class InvitationInDBBase(TimestampMixin):
 
 class InvitationResponse(InvitationInDBBase):
     """Schema for invitation API responses."""
+
+
+class InvitationCreateResponse(InvitationResponse):
+    """Schema for the response after creating an invitation, including the token."""
+    token: str = Field(..., description="The generated invitation token (only shown on creation)")
 
 
 class InvitationDetailResponse(InvitationResponse):

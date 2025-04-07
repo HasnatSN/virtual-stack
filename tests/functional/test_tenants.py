@@ -40,7 +40,7 @@ async def test_get_tenants(authenticated_async_client: AsyncClient):
     assert response.status_code == status.HTTP_200_OK, response.text
     data = response.json()
     assert isinstance(data, list)
-    found = any(item["id"] == pytest.tenant_id for item in data)
+    found = any(item["id"] == str(pytest.tenant_id) for item in data)
     assert found, "Created tenant not found in list"
 
 
@@ -52,8 +52,8 @@ async def test_get_tenant_by_id(authenticated_async_client: AsyncClient):
     response = await authenticated_async_client.get(f"/api/v1/tenants/{tenant_id}")
     assert response.status_code == status.HTTP_200_OK, response.text
     data = response.json()
-    assert data["id"] == tenant_id
-    assert data["name"] == TEST_TENANT_NAME
+    assert data["id"] == str(tenant_id)
+    assert data["name"] == "Test Tenant"
 
 
 async def test_update_tenant(authenticated_async_client: AsyncClient):
@@ -67,7 +67,7 @@ async def test_update_tenant(authenticated_async_client: AsyncClient):
     )
     assert response.status_code == status.HTTP_200_OK, response.text
     data = response.json()
-    assert data["id"] == tenant_id
+    assert data["id"] == str(tenant_id)
     assert data["description"] == update_data["description"]
 
 

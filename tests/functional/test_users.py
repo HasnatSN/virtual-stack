@@ -54,7 +54,7 @@ async def test_get_user_by_id(
     response = await authenticated_async_client.get(f"/api/v1/users/{user_id}")  # Use await
     assert response.status_code == status.HTTP_200_OK, response.text
     data = response.json()
-    assert data["id"] == user_id
+    assert data["id"] == str(user_id)
     assert data["email"] == TEST_USER["email"]
 
 
@@ -88,7 +88,7 @@ async def test_update_user(
     )
     assert response.status_code == status.HTTP_200_OK, response.text
     data = response.json()
-    assert data["id"] == user_id
+    assert data["id"] == str(user_id)
     assert data["last_name"] == update_data["last_name"]
     # TODO: Add test for updating user's own info via /me endpoint
 

@@ -53,7 +53,7 @@ services:
       POSTGRES_PASSWORD: testpassword
       POSTGRES_DB: virtualstack_test
     ports:
-      - "5433:5432"
+      - "5434:5432"
     volumes:
       - postgres_test_data:/var/lib/postgresql/data/
 

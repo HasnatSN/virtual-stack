@@ -23,6 +23,7 @@ class Invitation(Base):
     """User invitation model for inviting users to join a tenant."""
 
     __tablename__ = "invitations"
+    __table_args__ = {"schema": "iam"}
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
@@ -37,14 +38,14 @@ class Invitation(Base):
 
     # Foreign key to tenant
     tenant_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=True), ForeignKey("iam.tenants.id", ondelete="CASCADE"), nullable=False
     )
 
     # Foreign key to inviter (the user who created the invitation)
-    inviter_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    inviter_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("iam.users.id"), nullable=False)
 
     # Foreign key to user (set when the invitation is accepted)
-    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), ForeignKey("iam.users.id"), nullable=True)
 
     # Role to assign to the user upon acceptance
     # TODO: Implement TenantRole model and uncomment this foreign key and relationship

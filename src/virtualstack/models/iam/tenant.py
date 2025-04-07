@@ -12,6 +12,7 @@ class Tenant(Base):
     """Tenant model representing an organization or workspace in the system."""
 
     __tablename__ = "tenants"
+    __table_args__ = {"schema": "iam"}
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(255), nullable=False, unique=True, index=True)
@@ -25,6 +26,7 @@ class Tenant(Base):
     # Relationships
     api_keys = relationship("APIKey", back_populates="tenant", cascade="all, delete-orphan")
     invitations = relationship("Invitation", back_populates="tenant", cascade="all, delete-orphan")
+    roles = relationship("Role", back_populates="tenant", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<Tenant {self.name} ({self.id})>"

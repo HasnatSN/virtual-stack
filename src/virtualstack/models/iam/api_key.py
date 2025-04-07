@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 import uuid
 
-from sqlalchemy import Boolean, Column, DateTime, Enum, ForeignKey, String, func
+from sqlalchemy import Boolean, Column, DateTime, Enum, ForeignKey, String, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -13,10 +13,12 @@ class APIKey(Base):
     """API Key model for authenticating client applications or services."""
 
     __tablename__ = "api_keys"
+    __table_args__ = {"schema": "iam"}
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    name = Column(String(255), nullable=False)
-    key_prefix = Column(String(8), nullable=False, index=True)
+    # Use a Python-level default function instead of server_default
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, nullable=False)
+    name = Column(String(255), nullable=False, index=True)
+    key_prefix = Column(String(8), nullable=False, unique=True, index=True)
     key_hash = Column(String(255), nullable=False)
     description = Column(String(500), nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
@@ -24,17 +26,17 @@ class APIKey(Base):
     last_used_at = Column(DateTime(timezone=True), nullable=True)
 
     # Foreign key to user who created the API key
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("iam.users.id", ondelete="CASCADE"), nullable=False)
 
     # Foreign key to tenant if key is tenant-scoped (NULL for global keys)
     tenant_id = Column(
-        UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=True
+        UUID(as_uuid=True), ForeignKey("iam.tenants.id", ondelete="CASCADE"), nullable=True
     )
 
     # Timestamps
-    # Use client-side default and ensure timezone awareness
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    # Keep client-side default for created_at (aware UTC datetime)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
     # Relationships
     user = relationship("User", back_populates="api_keys")
