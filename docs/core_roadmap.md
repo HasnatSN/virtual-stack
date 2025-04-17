@@ -11,16 +11,22 @@ This document outlines the remaining tasks required to complete the core Identit
 *   **Goal:** Resolve database/migration issues, fix basic API endpoints (health, login, list tenants, list users), and ensure core user/tenant association works.
 *   **Status:** **DONE.** Extensive debugging of Alembic migrations, database connections, ORM models, and dependency injection corrected numerous issues. The `scripts/test_api_basic.py` script now passes, verifying health check, login, tenant listing, and user listing within a tenant.
 
-### 2. Stabilize Roles and Permissions System (Mostly Done)
+### 2. Stabilize Roles and Permissions System (In Progress)
 
 *   **Goal:** Implement and thoroughly test the full RBAC system.
-*   **Status:** Basic global role CRUD tests pass. User-role assignment (`POST`) and removal (`DELETE`) endpoints/services implemented and tests pass. Role permission management endpoints/services implemented and tests pass. Real permission checking has been implemented in all dependency factories. Tests for permission dependencies are passing.
+*   **Status:** Basic global role CRUD endpoints work. User-role assignment and Role permission management endpoints/services exist. Real permission checking (`require_permission` etc.) implemented and basic tests pass. However, running `tests/functional/test_roles.py` still reveals errors related to test setup (initially `UndefinedTableError`, now potentially rate limiting or other dependency issues) preventing full verification. Debugging of `conftest.py` fixtures is ongoing.
+*   **Current Blocker:** Functional test suite is failing due to test DB authentication errors (InvalidPasswordError for user "testuser").
+*   **Action Items:**
+    1. Align `TEST_DATABASE_URL` credentials with the test DB (use `virtualstack:virtualstack` as defined in `.env`/Docker-compose).
+    2. Adjust `config.py` or set environment variables (`TEST_POSTGRES_USER`, `TEST_POSTGRES_PASSWORD`) before test setup.
+    3. Verify migrations run against the correct test DB and re-seed initial data.
 *   **Tasks:**
     *   [X] **Run Role Assignment Tests:** `tests/functional/test_role_assignments.py` executed and failures fixed.
-    *   [X] **Run Role Permission Tests:** `tests/functional/test_roles.py` executed and failures fixed.
+    *   [X] **Run Role Permission Tests:** `tests/functional/test_roles.py` executed, but fixture setup errors persist.
     *   [X] **Implement Real Permission Checking (`require_permission`):** Verified `require_permission` correctly checks permissions.
     *   [X] **Implement Real Permission Checking (`require_any_permission`, `require_all_permissions`):** Verified these dependencies work.
     *   [X] **Write/Verify Permission Dependency Tests:** Tests passing.
+    *   [ ] **Resolve Test Fixture Issues:** Fix remaining errors (`UndefinedTableError`, `429 Too Many Requests`) in `tests/functional/test_roles.py` by debugging `conftest.py`.
     *   [ ] **Increase Test Coverage:** Increase test coverage for `role.py`, `permission.py`, `permissions.py`, `deps.py` related to RBAC. Aim for >80%.
 
 ### 3. Invitation System (Partially Done)
@@ -45,7 +51,7 @@ This document outlines the remaining tasks required to complete the core Identit
     *   [ ] **Review Service Methods:** Systematically review all service methods (especially list/get operations) for consistent `tenant_id` filtering.
     *   [ ] **Add Tenant Isolation Tests:** Create specific integration tests.
     *   [X] **Implement/Test Tenant User Listing:** Endpoint `GET /tenants/{tenant_id}/users/` verified.
-    *   [ ] **Implement/Test Other Tenant User Management:** Verify other user management endpoints within tenant context (if any). 
+    *   [ ] **Implement/Test Other Tenant User Management:** Verify other user management endpoints within tenant context (if any).
 
 ## Secondary Priorities / Paused
 
@@ -72,15 +78,30 @@ This document outlines the remaining tasks required to complete the core Identit
 
 Significant progress has been made, resolving core database, migration, and basic API endpoint issues. The basic flow for login, tenant access, and user listing is functional. Permission dependency checking is implemented and tested. The immediate priorities are now:
 
-1.  **Complete Invitation System:** Finalize service logic (verify role assignment) and fix any remaining tests in `test_invitations.py`.
-2.  **Verify Tenant Isolation:** Conduct the service review and add dedicated isolation tests.
-3.  **Increase RBAC Test Coverage:** Improve test coverage for roles, permissions, and related dependencies.
+1.  **Fix Role Tests:** Resolve the persistent test setup errors (`UndefinedTableError`/`429 Too Many Requests`) in `tests/functional/test_roles.py` by debugging `conftest.py` fixtures.
+2.  **Complete Invitation System:** Finalize service logic (verify role assignment) and fix any remaining tests in `test_invitations.py`.
+3.  **Verify Tenant Isolation:** Conduct the service review and add dedicated isolation tests.
+4.  **Increase RBAC Test Coverage:** Improve test coverage for roles, permissions, and related dependencies once tests are stable.
 
 Work on API Keys, Technical Debt, or infrastructure adapters will commence only after these core IAM functionalities are complete, tested, and stable.
 
 ## Immediate Next Step
 
-1.  **Finalize Invitation System:** Focus on verifying role assignment in `invitation_service.accept_invitation` and running `test_invitations.py` to fix remaining issues.
+1.  **Fix Role Tests:** Continue debugging `tests/functional/test_roles.py` and `conftest.py` to resolve the `UndefinedTableError` and `429 Too Many Requests` errors.
+
+## Immediate Next Steps Checklist
+
+- [ ] Align TEST DB credentials (`TEST_DATABASE_URL`) with actual test DB credentials (`virtualstack:virtualstack` on port 5434)
+- [ ] Override `TEST_POSTGRES_USER` and `TEST_POSTGRES_PASSWORD` in `src/virtualstack/core/config.py` or via environment variables before tests
+- [ ] Confirm `scripts/run_dev.sh` works and remove references to deprecated scripts (e.g., `run-without-reload.sh`)
+- [ ] Rerun Alembic migrations against the test DB (via `create_test_schema` fixture)
+- [ ] Verify `seed_initial_data` executes without errors
+- [ ] Functional Test: Health check (`GET /health`)
+- [ ] Functional Test: Authentication token (`POST /api/v1/auth/token`)
+- [ ] Functional Test: Current user info (`GET /api/v1/users/me`)
+- [ ] Functional Test: List tenants (`GET /api/v1/tenants`)
+- [ ] Functional Test: List users in tenant (`GET /api/v1/tenants/{tenant_id}/users`)
+- [ ] Update API reference documentation with confirmed endpoints and examples
 
 ---
 
@@ -94,7 +115,7 @@ This section outlines the *minimum* necessary backend API endpoints identified b
 *   Authentication: Handled via Authorization header (e.g., Bearer Token).
 *   Tenant Scoping: All resource endpoints are automatically scoped to the user's active tenant based on their authentication context unless otherwise specified.
 *   Standard List Responses: List endpoints (`GET` collections) support pagination (`?page=1&limit=20`).
-*   Error Handling: Consistent error response format (e.g., `{ \"detail\": \"Error message\" }`).
+*   Error Handling: Consistent error response format (e.g., `{ "detail": "Error message" }`).
 
 ---
 
@@ -105,8 +126,8 @@ This section outlines the *minimum* necessary backend API endpoints identified b
 *   **Method:** `POST`
 *   **Path:** `/auth/token`
 *   **Description:** Authenticates a user, returns access token.
-*   **Request:** `application/x-www-form-urlencoded` or JSON `{ \"username\": \"user@email.com\", \"password\": \"user_password\" }`
-*   **Response:** `{ \"access_token\": \"xxx.yyy.zzz\", \"token_type\": \"bearer\" }`
+*   **Request:** `application/x-www-form-urlencoded` or JSON `{ "username": "user@email.com", "password": "user_password" }`
+*   **Response:** `{ "access_token": "xxx.yyy.zzz", "token_type": "bearer" }`
 *   **Permissions:** Public
 
 ### 1.2. Get Current User Info
@@ -115,7 +136,7 @@ This section outlines the *minimum* necessary backend API endpoints identified b
 *   **Path:** `/users/me`
 *   **Description:** Retrieves details of the authenticated user (needed for UI display, permissions context).
 *   **Request:** None (Auth token required)
-*   **Response:** `{ \"id\": \"user-1\", \"email\": \"admin@example.com\", \"first_name\": \"Admin\", \"last_name\": \"User\", \"is_active\": true }`
+*   **Response:** `{ "id": "user-1", "email": "admin@example.com", "first_name": "Admin", "last_name": "User", "is_active": true }`
 *   **Permissions:** Authenticated User
 
 ---
@@ -128,7 +149,7 @@ This section outlines the *minimum* necessary backend API endpoints identified b
 *   **Path:** `/tenants`
 *   **Description:** Retrieves tenants accessible to the user (for Tenant Selector).
 *   **Request:** None (Auth token required)
-*   **Response:** `[ { \"id\": \"tenant-abc\", \"name\": \"Huemer Demo Tenant\" }, ... ]`
+*   **Response:** `[ { "id": "tenant-abc", "name": "Huemer Demo Tenant" }, ... ]`
 *   **Permissions:** Authenticated User
 
 *   **Note:** Tenant selection is handled client-side for MVP. Backend scopes requests based on user's token and permissions within the target tenant context.
@@ -145,7 +166,7 @@ This section outlines the *minimum* necessary backend API endpoints identified b
 *   **Path:** `/users`
 *   **Description:** Retrieves users within the current tenant for display and role assignment. Supports pagination.
 *   **Request:** Query Params: `?page=...`, `?limit=...`, `?search=...` (optional search)
-*   **Response:** `{ \"items\": [ { \"id\": \"user-1\", \"email\": \"...\", \"first_name\": \"...\", \"last_name\": \"...\", \"is_active\": true, \"roles\": [\"Tenant Admin\"] }, ... ], \"total\": ..., \"page\": ..., \"limit\": ... }`
+*   **Response:** `{ "items": [ { "id": "user-1", "email": "...", "first_name": "...", "last_name": "...", "is_active": true, "roles": ["Tenant Admin"] }, ... ], "total": ..., "page": ..., "limit": ... }`
 *   **Permissions:** `user:read`
 
 #### 3.1.2. [MVP Optional] Update User (Activate/Deactivate)
@@ -153,7 +174,7 @@ This section outlines the *minimum* necessary backend API endpoints identified b
 *   **Method:** `PATCH`
 *   **Path:** `/users/{user_id}`
 *   **Description:** Allows activating/deactivating a user. May be deferrable if user management outside the app is acceptable for MVP.
-*   **Request:** `{ \"is_active\": boolean }`
+*   **Request:** `{ "is_active": boolean }`
 *   **Response:** Updated User Object
 *   **Permissions:** `user:update`
 
@@ -174,25 +195,25 @@ This section outlines the *minimum* necessary backend API endpoints identified b
 *   **Path:** `/roles`
 *   **Description:** Retrieves roles (system & custom) in the tenant.
 *   **Request:** None
-*   **Response:** `[ { \"id\": \"role-1\", \"name\": \"Tenant Admin\", ..., \"is_system_role\": true, \"user_count\": 2 }, ... ]`
+*   **Response:** `[ { "id": "role-1", "name": "Tenant Admin", ..., "is_system_role": true, "user_count": 2 }, ... ]`
 *   **Permissions:** `role:read`
 
 #### 3.2.2. Get Role Details (incl. Permissions)
 
 *   **Method:** `GET`
 *   **Path:** `/roles/{role_id}`
-*   **Description:** Retrieves details and assigned permissions for a specific role (for \"View Permissions\" modal).
+*   **Description:** Retrieves details and assigned permissions for a specific role (for "View Permissions" modal).
 *   **Request:** None
-*   **Response:** `{ \"id\": \"role-1\", ..., \"permissions\": [ { \"id\": \"vm:read\", ... }, ... ] }`
+*   **Response:** `{ "id": "role-1", ..., "permissions": [ { "id": "vm:read", ... }, ... ] }`
 *   **Permissions:** `role:read`
 
 #### 3.2.3. List Available Permissions
 
 *   **Method:** `GET`
 *   **Path:** `/permissions`
-*   **Description:** Retrieves all possible permissions (for \"Create/Edit Custom Role\" dialogs).
+*   **Description:** Retrieves all possible permissions (for "Create/Edit Custom Role" dialogs).
 *   **Request:** None
-*   **Response:** `[ { \"id\": \"vm:read\", \"name\": \"View VMs\", \"module\": \"VMs\" }, ... ]`
+*   **Response:** `[ { "id": "vm:read", "name": "View VMs", "module": "VMs" }, ... ]`
 *   **Permissions:** `role:read` (or dedicated permission)
 
 #### 3.2.4. Create Custom Role
@@ -200,8 +221,8 @@ This section outlines the *minimum* necessary backend API endpoints identified b
 *   **Method:** `POST`
 *   **Path:** `/roles`
 *   **Description:** Creates a new custom role.
-*   **Request:** `{ \"name\": \"...\", \"description\": \"...\", \"permission_ids\": [\"vm:read\", ...] }`
-*   **Response:** `{ \"id\": \"role-new-xyz\", ... }`
+*   **Request:** `{ "name": "...", "description": "...", "permission_ids": ["vm:read", ...] }`
+*   **Response:** `{ "id": "role-new-xyz", ... }`
 *   **Permissions:** `role:create`
 
 #### 3.2.5. Update Custom Role
@@ -209,8 +230,8 @@ This section outlines the *minimum* necessary backend API endpoints identified b
 *   **Method:** `PATCH`
 *   **Path:** `/roles/{role_id}`
 *   **Description:** Updates a custom role's name, description, and permissions.
-*   **Request:** `{ \"name\": \"...\", \"description\": \"...\", \"permission_ids\": [...] }` (Partial updates allowed)
-*   **Response:** Updated Role Object `{ \"id\": \"...\", ... }`
+*   **Request:** `{ "name": "...", "description": "...", "permission_ids": [...] }` (Partial updates allowed)
+*   **Response:** Updated Role Object `{ "id": "...", ... }`
 *   **Permissions:** `role:update`
 
 #### 3.2.6. Delete Custom Role
@@ -226,9 +247,9 @@ This section outlines the *minimum* necessary backend API endpoints identified b
 
 *   **Method:** `GET`
 *   **Path:** `/roles/{role_id}/users`
-*   **Description:** Retrieves user IDs assigned to a role (for \"Manage Users\" dialog).
+*   **Description:** Retrieves user IDs assigned to a role (for "Manage Users" dialog).
 *   **Request:** None
-*   **Response:** `{ \"user_ids\": [\"user-1\", ...] }`
+*   **Response:** `{ "user_ids": ["user-1", ...] }`
 *   **Permissions:** `user:read`, `role:read`
 
 #### 3.2.8. Update Assigned Users for a Role
@@ -236,7 +257,7 @@ This section outlines the *minimum* necessary backend API endpoints identified b
 *   **Method:** `PUT`
 *   **Path:** `/roles/{role_id}/users`
 *   **Description:** Sets the complete list of users assigned to a role.
-*   **Request:** `{ \"user_ids\": [\"user-1\", \"user-5\"] }`
+*   **Request:** `{ "user_ids": ["user-1", "user-5"] }`
 *   **Response:** Status 200 OK or 204 No Content.
 *   **Permissions:** `role:assign_users`
 
@@ -250,7 +271,7 @@ This section outlines the *minimum* necessary backend API endpoints identified b
 *   **Path:** `/vms`
 *   **Description:** Retrieves VMs in the tenant. Supports pagination.
 *   **Request:** Query Params: `?page=...`, `?limit=...`, `?search=...` (optional)
-*   **Response:** `{ \"items\": [ { \"id\": \"vm-123\", \"name\": \"...\", \"status\": \"RUNNING\" | \"STOPPED\" | \"PROVISIONING\" | \"ERROR\", \"cpu\": ..., \"memory_gb\": ..., \"disk_gb\": ..., \"ip_address\": \"...\", \"created_at\": \"...\", \"template_name\": \"...\" }, ... ], \"total\": ..., ... }`
+*   **Response:** `{ "items": [ { "id": "vm-123", "name": "...", "status": "RUNNING" | "STOPPED" | "PROVISIONING" | "ERROR", "cpu": ..., "memory_gb": ..., "disk_gb": ..., "ip_address": "...", "created_at": "...", "template_name": "..." }, ... ], "total": ..., ... }`
 *   **Permissions:** `vm:read`
 
 ### 4.2. Get VM Details
@@ -259,7 +280,7 @@ This section outlines the *minimum* necessary backend API endpoints identified b
 *   **Path:** `/vms/{vm_id}`
 *   **Description:** Retrieves details for a specific VM (primarily for Edit form pre-fill).
 *   **Request:** None
-*   **Response:** `{ \"id\": \"vm-123\", \"name\": \"...\", \"status\": \"...\", ... }`
+*   **Response:** `{ "id": "vm-123", "name": "...", "status": "...", ... }`
 *   **Permissions:** `vm:read`
 
 ### 4.3. Create VM
@@ -267,8 +288,8 @@ This section outlines the *minimum* necessary backend API endpoints identified b
 *   **Method:** `POST`
 *   **Path:** `/vms`
 *   **Description:** Creates a new VM.
-*   **Request:** `{ \"name\": \"...\", \"source_type\": \"template\" | \"iso\", \"template_id\": \"...\", \"iso_url\": \"...\", \"cpu\": ..., \"memory_gb\": ..., \"disk_gb\": ... }` (Need config details if not template-defined)
-*   **Response:** `{ \"id\": \"vm-new-abc\", \"status\": \"PROVISIONING\", ... }`
+*   **Request:** `{ "name": "...", "source_type": "template" | "iso", "template_id": "...", "iso_url": "...", "cpu": ..., "memory_gb": ..., "disk_gb": ... }` (Need config details if not template-defined)
+*   **Response:** `{ "id": "vm-new-abc", "status": "PROVISIONING", ... }`
 *   **Permissions:** `vm:create`
 
 ### 4.4. Update VM Name
@@ -276,8 +297,8 @@ This section outlines the *minimum* necessary backend API endpoints identified b
 *   **Method:** `PATCH`
 *   **Path:** `/vms/{vm_id}`
 *   **Description:** Updates the VM's name.
-*   **Request:** `{ \"name\": \"new-name\" }`
-*   **Response:** `{ \"id\": \"vm-123\", \"name\": \"new-name\", ... }`
+*   **Request:** `{ "name": "new-name" }`
+*   **Response:** `{ "id": "vm-123", "name": "new-name", ... }`
 *   **Permissions:** `vm:update`
 
 ### 4.5. Delete VM
@@ -293,9 +314,9 @@ This section outlines the *minimum* necessary backend API endpoints identified b
 
 *   **Method:** `GET`
 *   **Path:** `/vms/{vm_id}/logs`
-*   **Description:** Retrieves activity/event logs for a VM (for the \"View Logs\" modal).
+*   **Description:** Retrieves activity/event logs for a VM (for the "View Logs" modal).
 *   **Request:** Query Params: `?limit=...` (optional)
-*   **Response:** `[ { \"timestamp\": \"...\", \"level\": \"INFO\", \"message\": \"...\" }, ... ]`
+*   **Response:** `[ { "timestamp": "...", "level": "INFO", "message": "..." }, ... ]`
 *   **Permissions:** `vm:read` (or `vm:read_logs`)
 
 ### 4.7. List VM Templates
@@ -304,7 +325,7 @@ This section outlines the *minimum* necessary backend API endpoints identified b
 *   **Path:** `/vm-templates`
 *   **Description:** Retrieves available templates for VM creation dropdown.
 *   **Request:** None
-*   **Response:** `[ { \"id\": \"tmpl-...\", \"name\": \"...\", ... }, ... ]`
+*   **Response:** `[ { "id": "tmpl-...", "name": "...", ... }, ... ]`
 *   **Permissions:** `vm:create` (or `template:read`)
 
 ### 4.8. Perform VM Power Action
@@ -312,7 +333,7 @@ This section outlines the *minimum* necessary backend API endpoints identified b
 *   **Method:** `POST`
 *   **Path:** `/vms/{vm_id}/actions`
 *   **Description:** Starts, stops, or restarts a VM.
-*   **Request:** `{ \"action\": \"start\" | \"stop\" | \"restart\" }`
+*   **Request:** `{ "action": "start" | "stop" | "restart" }`
 *   **Response:** Status 202 Accepted or 200 OK + updated VM status.
 *   **Permissions:** `vm:power_manage`
 

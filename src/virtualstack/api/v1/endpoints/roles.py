@@ -4,9 +4,15 @@ from typing import Any, List
 from fastapi import APIRouter, Depends, HTTPException, status, Path, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from virtualstack.api.deps import get_db, require_permission, get_current_active_user, get_tenant_from_path
-# Removed Permission import
-# from virtualstack.core.permissions import Permission
+from virtualstack.api.deps import (
+    get_db,
+    get_current_active_user,
+    get_tenant_from_path,
+    require_permission,
+    get_current_active_tenant,
+    require_permission_in_active_tenant,
+)
+from virtualstack.core.permissions import Permission
 from virtualstack.schemas.iam import (
     Role,
     RoleCreate,
@@ -20,28 +26,30 @@ from virtualstack.schemas.iam.permission import Permission as PermissionSchema
 from virtualstack.services.iam import permission_service, role_service
 from virtualstack.models.iam.user import User
 from virtualstack.models.iam.tenant import Tenant
-# Keep Permission import moved here from earlier step? Let's remove it entirely now.
-# from virtualstack.core.permissions import Permission
 
 router = APIRouter()
 
 
-@router.get("/", response_model=List[RoleList])
-async def list_roles_in_tenant(
+@router.get(
+    "/",
+    response_model=List[RoleList],
+    summary="List Roles in Active Tenant",
+    description="Lists roles (system & custom) available within the active tenant, including user counts."
+)
+async def list_roles_in_active_tenant(
     *,
-    tenant: Tenant = Depends(get_tenant_from_path),
+    active_tenant: Tenant = Depends(get_current_active_tenant),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    # Pass permission string
-    _: User = Depends(require_permission("role:read")),
+    _: User = Depends(require_permission_in_active_tenant(Permission.ROLE_READ)),
 ):
-    """List roles (system & custom) available within the specified tenant.
-       Includes the count of users assigned to each role in this tenant.
-    """
+    """List roles available within the user's active tenant."""
+    logger.info(f"Listing roles for active tenant {active_tenant.id} with skip={skip}, limit={limit}")
     roles_with_count = await role_service.get_multi_by_tenant_with_user_count(
-        db, tenant_id=tenant.id, skip=skip, limit=limit
+        db, tenant_id=active_tenant.id, skip=skip, limit=limit
     )
+    logger.debug(f"Found {len(roles_with_count)} roles for active tenant {active_tenant.id}")
     return [RoleList.model_validate(role_data) for role_data in roles_with_count]
 
 
@@ -51,7 +59,6 @@ async def create_custom_role_in_tenant(
     tenant: Tenant = Depends(get_tenant_from_path),
     role_in: RoleCreate,
     db: AsyncSession = Depends(get_db),
-    # Pass permission string
     _: User = Depends(require_permission("role:create")),
 ):
     """Create a new custom role within the specified tenant."""
@@ -79,7 +86,6 @@ async def get_role_details(
     tenant: Tenant = Depends(get_tenant_from_path),
     role_id: UUID = Path(...),
     db: AsyncSession = Depends(get_db),
-    # Pass permission string
     _: User = Depends(require_permission("role:read")),
 ):
     """Get details for a specific role (system or custom) accessible in the tenant,
@@ -103,7 +109,6 @@ async def update_custom_role_in_tenant(
     role_id: UUID = Path(...),
     role_in: RoleUpdate,
     db: AsyncSession = Depends(get_db),
-    # Pass permission string
     _: User = Depends(require_permission("role:update")),
 ):
     """Update a custom role's name, description, or permissions within the tenant.
@@ -137,7 +142,6 @@ async def delete_custom_role_from_tenant(
     tenant: Tenant = Depends(get_tenant_from_path),
     role_id: UUID = Path(...),
     db: AsyncSession = Depends(get_db),
-    # Pass permission string
     _: User = Depends(require_permission("role:delete")),
 ):
     """Delete a custom role from the tenant.
@@ -149,26 +153,30 @@ async def delete_custom_role_from_tenant(
     return None
 
 
-# Note: /permissions is technically not tenant-scoped, but requires role:read
-# It should probably move to a separate router eventually.
-@router.get("/permissions", response_model=List[PermissionSchema])
+# Note: This endpoint lists global permissions, but access is controlled by ROLE_READ in the active tenant.
+@router.get("/permissions", response_model=List[PermissionSchema],
+    summary="List Available Permissions",
+    description="Lists all available permissions defined in the system.",
+    # TODO: Consider if a more specific permission like SYSTEM_READ_PERMISSIONS is better long-term.
+    dependencies=[Depends(require_permission_in_active_tenant(Permission.ROLE_READ))])
 async def list_available_permissions(
     *,
     db: AsyncSession = Depends(get_db),
-    # Pass permission string
-    _: User = Depends(require_permission("role:read")),
+    # _: User = Depends(...) # User implicitly checked by permission dependency
+    active_tenant: Tenant = Depends(get_current_active_tenant) # Still need tenant context for permission check
 ):
-    """List all available permissions in the system.
-       (Permissions themselves are global, not tenant-specific).
-    """
-    return await permission_service.get_multi(db, skip=0, limit=1000)
+    """List all available permissions in the system, requires ROLE_READ in active tenant."""
+    logger.info(f"Listing all available permissions (accessed via active tenant {active_tenant.id})")
+    # Permissions themselves are global, service layer fetches all.
+    permissions = await permission_service.get_multi(db, skip=0, limit=1000)
+    logger.debug(f"Returning {len(permissions)} available permissions.")
+    return permissions
 
 
 @router.get(
     "/{role_id}/users",
     response_model=RoleUserAssignmentOutput,
-    # Pass permission strings
-    dependencies=[Depends(require_permission("role:read")), Depends(require_permission("user:read"))]
+    # Remove dependencies as tenant context/access is checked implicitly/manually
 )
 async def get_assigned_users_for_role(
     *,
@@ -189,8 +197,7 @@ async def get_assigned_users_for_role(
 @router.put(
     "/{role_id}/users",
     response_model=RoleUserAssignmentOutput,
-    # Pass permission string
-    dependencies=[Depends(require_permission("role:assign_users"))]
+    # Remove dependencies as tenant context/access is checked implicitly/manually
 )
 async def set_assigned_users_for_role(
     *,

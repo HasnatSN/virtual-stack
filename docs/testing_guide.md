@@ -67,35 +67,20 @@ To check how much of the application code is exercised by the tests:
 
 Our target code coverage is **80%**.
 
-## Current Test Status (As of 2025-04-02 - Updated Again)
+## Current Test Status (As of 2025-04-16)
 
-*   **Total Tests:** 57 collected (when running `tests/functional/test_role_assignments.py` specifically: 8 collected)
-*   **Passed:** 7 (in `test_role_assignments.py` run)
-*   **Failed:** 1 (in `test_role_assignments.py` run)
-*   **Skipped:** 9 (across the full suite)
-*   **Coverage:** 62% (after latest `test_role_assignments.py` run - may increase slightly now)
+*   **Pytest Execution:** Stopped after error in `scripts/test_api_basic.py`.
+*   **Passed Tests:** 1 (`test_health_check`).
+*   **Error:** 1 (`test_login`) - fixture 'client' not found.
+*   **Coverage:** Not calculated (test suite did not complete).
 
-**Recent Changes:**
+**Next Steps:**
 
-*   The previous blocker related to test database connection (`OSError: [Errno 61] Connection refused`) has been **RESOLVED**.
-*   The `setup_database` and `app` fixtures in `conftest.py` were changed from `session` scope to `function` scope to ensure proper test isolation.
-*   The hardcoded role UUID in `test_assign_role_to_user_permission_denied` was fixed.
-*   A tenant existence check was added to the `require_permission` dependency in `deps.py`, fixing the incorrect 403 in `test_assign_role_non_existent_tenant` (now passes).
-*   The user membership check (`is_member`) was removed from the `assign_role_to_user` endpoint, allowing tenant admins to assign the first role and fixing several 400 errors.
-
-**Current Failures (in `test_role_assignments.py`):**
-
-1.  `test_assign_role_to_user_not_in_tenant`: Expected `400 Bad Request`, but received `404 Not Found`. This is because the test uses a non-existent tenant ID, causing the dependency's tenant check to return 404 before the endpoint's specific logic can be tested. **This test needs redesign** to use a second, valid tenant created in the test setup.
-
-**Next Steps:** Mark the failing test (`test_assign_role_to_user_not_in_tenant`) as skipped and add a TODO. Then, run the full test suite.
-
-**Skipped Tests:**
-
-*   Tests related to API Key functionality (`test_api_keys.py`) are skipped as this feature is currently paused/low priority. One test (`test_api_key_expiry`) was failing due to a timezone comparison `TypeError` before being skipped/paused.
-*   Tests related to the Invitation system (`test_invitations.py`) are skipped as this feature is currently paused.
+*   Fix fixture error or adjust test discovery to exclude scripts directory.
+*   Re-run full test suite in `tests/` directory to calculate coverage.
 
 ## Test Structure
 
 *   **Functional Tests:** Located in `tests/functional/`, these tests interact with the application via HTTP requests, testing end-to-end behavior of API endpoints.
 *   **Unit Tests:** (Currently minimal/none) Would be located in `tests/unit/` for testing isolated components like utility functions or specific service logic in isolation (using mocking).
-*   **Fixtures:** Core test setup, like database initialization and authenticated HTTP clients, are defined as fixtures in `tests/conftest.py` to be reused across multiple tests. 
+*   **Fixtures:** Core test setup, like database initialization and authenticated HTTP clients, are defined as fixtures in `tests/conftest.py` to be reused across multiple tests.

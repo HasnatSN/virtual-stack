@@ -1,17 +1,34 @@
-from collections.abc import AsyncGenerator
+import sys
 import os
-
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-from httpx import ASGITransport, AsyncClient
 import pytest
+from typing import Generator, Any, AsyncGenerator
+import logging
+import asyncio
+from uuid import UUID
+import alembic
+
+# Add project root to sys.path to allow absolute imports from 'src'
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from httpx import ASGITransport, AsyncClient
+from fastapi import FastAPI
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, AsyncEngine, AsyncConnection
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
-from sqlalchemy.sql import text
+from sqlalchemy import text
+from sqlalchemy.schema import CreateTable, CreateSchema, DropSchema
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import ProgrammingError
 
 from src.virtualstack.api.deps import get_db # Import the dependency
+# Remove the problematic import
+# from src.virtualstack.api.v1.endpoints.auth import login_rate_limiter 
+
+# Import the rate_limit function to create our own rate limiter for testing
+from src.virtualstack.core.rate_limiter import rate_limit
 
 # Ensure models are imported so Base.metadata is populated
 import src.virtualstack.models
@@ -20,8 +37,15 @@ import src.virtualstack.models
 # This ensures settings loads the correct .env file if logic depends on RUN_ENV
 os.environ["RUN_ENV"] = "test"
 
+# Explicit override: ensure TEST_DATABASE_URL matches the Docker test container
+os.environ["TEST_DATABASE_URL"] = "postgresql+asyncpg://testuser:testpassword@localhost:5434/virtualstack_test"
+
 from virtualstack.core.config import settings
 from virtualstack.db.base import Base
+from virtualstack.core.security import create_access_token # Import token creation function
+
+# Force settings.TEST_DATABASE_URL to match the test container DSN (override pydantic default)
+settings.TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 
 if not settings.TEST_DATABASE_URL:
     raise RuntimeError("Test database URL (TEST_DATABASE_URL) not set in environment or .env file.")
@@ -29,7 +53,7 @@ if not settings.TEST_DATABASE_URL:
 test_engine = create_async_engine(str(settings.TEST_DATABASE_URL), echo=False) # Corrected: Use URL
 TestingSessionLocal = sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
 
-from virtualstack.main import app as fastapi_app  # Import your FastAPI app
+from virtualstack.main import app as fastapi_app # Import the app instance directly
 from virtualstack.schemas.iam.user import UserCreate  # Import UserCreate schema
 from virtualstack.services.iam import user_service, tenant_service, role_service, permission_service # Import services
 from virtualstack.models.iam import User, Tenant, Role, Permission # Added Role, Permission
@@ -38,484 +62,360 @@ from virtualstack.schemas.iam.role import RoleCreate
 from virtualstack.schemas.iam.permission import PermissionCreate # Add PermissionCreate
 from virtualstack.core import permissions as core_permissions # Import the enum definition
 
+# Create our own login_rate_limiter for testing - a simple pass-through function
+# that doesn't actually rate limit but satisfies the dependency
+async def login_rate_limiter():
+    """No-op rate limiter for testing."""
+    return None
+
+# Hardcode the schema name used by the models
+DB_SCHEMA_NAME = "iam"
+
+# Configure logging for tests
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Alembic imports
+from alembic.config import Config as AlembicConfig
+from alembic import command as alembic_command
+# Remove dynamic loading imports if they exist
+# import importlib.util
+# import importlib.machinery
+import asyncio # Ensure asyncio is imported
+import os
+import alembic
+
+# Ensure project root is defined (needed for script_location)
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
 # --- Database Fixtures ---
 
-@pytest_asyncio.fixture(scope="function", autouse=True)
-async def setup_database():
-    """Sets up the test database, seeds initial data, and tears down afterwards.
-
-    Scope is FUNCTION to ensure isolation between tests.
-    Autouse=True ensures this runs for every test function.
-    Uses engine connection for DDL and a separate session for seeding.
-    """
-    print("Setting up database and test users for function...")
-
-    # --- DDL Operations --- 
-    print("Performing DDL operations using engine connection...")
-    async with test_engine.begin() as conn:
-        print("Dropping existing 'iam' schema (if exists)...")
-        await conn.execute(text("DROP SCHEMA IF EXISTS iam CASCADE;"))
-        print("Creating 'iam' schema...")
-        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS iam;"))
-        print("Creating tables...")
-        # Pass the connection to run_sync for create_all
-        # Explicitly pass the schema name to create_all
-        print("Creating tables for schema 'iam'...")
-        await conn.run_sync(
-            lambda sync_conn: Base.metadata.create_all(
-                bind=sync_conn, 
-                tables=None, # Explicitly None to create all tables in metadata
-                checkfirst=False, # Try creating without checking first 
-                schemas=['iam'] # Explicitly target the 'iam' schema
-            )
-        )
-        try:
-            await conn.execute(text('CREATE EXTENSION IF NOT EXISTS "uuid-ossp";'))
-            print("Ensured uuid-ossp extension exists.")
-        except Exception as e:
-            if "already exists" not in str(e):
-                 print(f"Could not create uuid-ossp extension (might require DB superuser or already exist): {e}")
-            else:
-                 print("uuid-ossp extension already exists.")
-        # Explicitly set search path for the transaction
-        print("Setting search_path to iam, public...")
-        await conn.execute(text("SET search_path TO iam, public;"))
-        print("DDL operations committed and search_path set.")
-        # Transaction commits automatically here upon exiting `async with test_engine.begin()`
-
-    # --- Seeding Operations --- 
-    print("Performing seeding operations using session...")
-    async with TestingSessionLocal() as db:
-        try:
-            # --- DIAGNOSTIC CHECK --- 
-            print("Executing diagnostic raw SQL check for iam.tenants...")
-            try:
-                await db.execute(text("SELECT 1 FROM iam.tenants LIMIT 1;"))
-                print("Diagnostic check SUCCESS: iam.tenants is visible.")
-            except Exception as diag_error:
-                print(f"Diagnostic check FAILED: iam.tenants not visible. Error: {diag_error}")
-                # Optionally re-raise if we want the setup to fail here
-                raise diag_error # Re-raise to see the error clearly
-            # --- END DIAGNOSTIC CHECK --- 
-
-            # Ensure tenant exists
-            existing_tenant = await tenant_service.get_by_slug(db, slug=settings.TEST_TENANT_SLUG)
-            tenant_id = None
-            if not existing_tenant:
-                tenant_in = TenantCreate(name="Test Tenant", slug=settings.TEST_TENANT_SLUG)
-                created_tenant = await tenant_service.create(db, obj_in=tenant_in)
-                tenant_id = created_tenant.id
-                print(f"Created test tenant: {created_tenant.name}, ID: {tenant_id}")
-            else:
-                tenant_id = existing_tenant.id
-                print(f"Test tenant already exists: {existing_tenant.name}, ID: {tenant_id}")
-            pytest.tenant_id = tenant_id
-
-            # Create first test user (admin)
-            user1_email = settings.TEST_USER_EMAIL
-            user1_password = settings.TEST_USER_PASSWORD
-            user1 = await user_service.get_by_email(db, email=user1_email)
-            if not user1:
-                user1_in = UserCreate(
-                    email=user1_email,
-                    password=user1_password,
-                    first_name="Test",
-                    last_name="Admin",
-                    is_superuser=True, 
-                    is_active=True,
-                )
-                user1 = await user_service.create(db, obj_in=user1_in)
-                print(f"Created test admin user: {user1.email}, ID: {user1.id}")
-            else:
-                if not user1.is_superuser or not user1.is_active:
-                     user1.is_superuser = True
-                     user1.is_active = True
-                     db.add(user1)
-                     print(f"Updated existing test admin user to be superuser and active: {user1.email}")
-                else:
-                    print(f"Test admin user already exists and is configured correctly: {user1.email}, ID: {user1.id}")
-            pytest.user_id = user1.id
-
-            # Create second test user (regular)
-            user2_email = "user2@virtualstack.example"
-            user2_password = "testpassword456!"
-            user2 = await user_service.get_by_email(db, email=user2_email)
-            if not user2:
-                user2_in = UserCreate(
-                    email=user2_email,
-                    password=user2_password,
-                    first_name="Regular",
-                    last_name="User",
-                    is_superuser=False,
-                    is_active=True,
-                )
-                user2 = await user_service.create(db, obj_in=user2_in)
-                print(f"Created second test user: {user2.email}, ID: {user2.id}")
-            else:
-                if user2.is_superuser or not user2.is_active:
-                    user2.is_superuser = False
-                    user2.is_active = True
-                    db.add(user2)
-                    print(f"Updated existing second test user to be non-superuser and active: {user2.email}")
-                else:
-                    print(f"Second test user already exists and is configured correctly: {user2.email}, ID: {user2.id}")
-            pytest.user2_email = user2_email
-            pytest.user2_password = user2_password
-            pytest.user2_id = user2.id
-
-            # --- Seed Permissions --- 
-            seeded_permissions = {}
-            print("Seeding core permissions...")
-            for perm_enum in core_permissions.Permission:
-                perm = await permission_service.get_by_name(db, name=perm_enum.value)
-                if not perm:
-                    perm_in = PermissionCreate(
-                        name=perm_enum.value, 
-                        code=perm_enum.value,
-                        description=f"System permission: {perm_enum.value}"
-                    )
-                    perm = await permission_service.create(db, obj_in=perm_in)
-                    print(f"  Created permission: {perm.name}, ID: {perm.id}")
-                else:
-                    pass 
-                seeded_permissions[perm_enum.value] = perm
-            if core_permissions.Permission.VM_READ.value in seeded_permissions:
-                 pytest.seeded_permission_id_vm_read = seeded_permissions[core_permissions.Permission.VM_READ.value].id
-            else:
-                 print(f"WARNING: Could not find/seed {core_permissions.Permission.VM_READ.value} permission for tests!")
-                 pytest.seeded_permission_id_vm_read = None
-
-            # --- Tenant Admin Role and User Setup ---
-            tenant_admin_role_name = "Tenant Admin"
-            tenant_admin_role = await role_service.get_by_name(db, name=tenant_admin_role_name, tenant_id=tenant_id)
-            tenant_admin_role_id = None
-            if not tenant_admin_role:
-                role_in = RoleCreate(
-                    name=tenant_admin_role_name, 
-                    description="Tenant Administrator Role",
-                    tenant_id=tenant_id,
-                    is_system_role=True
-                )
-                tenant_admin_role = await role_service.create(db, obj_in=role_in)
-                tenant_admin_role_id = tenant_admin_role.id
-                print(f"Created role: {tenant_admin_role.name}, ID: {tenant_admin_role_id}")
-                permissions_to_assign = [
-                    core_permissions.Permission.TENANT_MANAGE_USER_ROLES,
-                    core_permissions.Permission.TENANT_VIEW_USERS,
-                    core_permissions.Permission.TENANT_MANAGE_INVITATIONS
-                ]
-                for perm_to_assign_enum in permissions_to_assign:
-                    perm_to_assign = seeded_permissions.get(perm_to_assign_enum.value)
-                    if perm_to_assign:
-                        print(f"Assigning permission '{perm_to_assign.name}' (ID: {perm_to_assign.id}) to role '{tenant_admin_role.name}' (ID: {tenant_admin_role.id})")
-                        try:
-                            await role_service.add_permission_to_role(
-                                db=db,
-                                role_id=tenant_admin_role.id,
-                                permission_id=perm_to_assign.id
-                            )
-                        except Exception as perm_error:
-                            print(f"ERROR assigning permission '{perm_to_assign.name}' to role '{tenant_admin_role.name}': {perm_error}")
-                    else:
-                        print(f"ERROR: Could not find seeded permission '{perm_to_assign_enum.value}' to assign to Tenant Admin role.")
-            else:
-                tenant_admin_role_id = tenant_admin_role.id
-                print(f"Tenant Admin role '{tenant_admin_role.name}' already exists: ID {tenant_admin_role_id}")
-            pytest.tenant_admin_role_id = tenant_admin_role_id
-
-            # Create third test user (tenant admin)
-            tenant_admin_email = "tenantadmin@virtualstack.example"
-            tenant_admin_password = "testpassword789!"
-            tenant_admin_user = await user_service.get_by_email(db, email=tenant_admin_email)
-            if not tenant_admin_user:
-                tenant_admin_in = UserCreate(
-                    email=tenant_admin_email,
-                    password=tenant_admin_password,
-                    first_name="Tenant",
-                    last_name="AdminUser",
-                    is_superuser=False,
-                    is_active=True,
-                )
-                tenant_admin_user = await user_service.create(db, obj_in=tenant_admin_in)
-                print(f"Created third test user (tenant admin): {tenant_admin_user.email}, ID: {tenant_admin_user.id}")
-            else:
-                print(f"Third test user (tenant admin) already exists: {tenant_admin_user.email}, ID: {tenant_admin_user.id}")
-
-            if tenant_admin_role_id:
-                 try:
-                    await user_service.assign_role_to_user_in_tenant(
-                        db=db,
-                        user_id=tenant_admin_user.id,
-                        role_id=tenant_admin_role_id,
-                        tenant_id=tenant_id
-                    )
-                    print(f"Assigned role '{tenant_admin_role_name}' to user '{tenant_admin_email}' in tenant ID '{tenant_id}'")
-                 except ValueError as assign_error:
-                    print(f"Info assigning role '{tenant_admin_role_name}' to user '{tenant_admin_email}': {assign_error}")
-                 except Exception as e:
-                    print(f"ERROR assigning role '{tenant_admin_role_name}' to user '{tenant_admin_email}': {e}")
-                    raise RuntimeError(f"Failed to assign Tenant Admin role during setup: {e}") from e
-            else:
-                print("ERROR: Cannot assign Tenant Admin role, role ID not found.")
-
-            pytest.tenant_admin_user_email = tenant_admin_email
-            pytest.tenant_admin_user_password = tenant_admin_password
-            pytest.tenant_admin_user_id = tenant_admin_user.id
-
-            # Explicitly commit all seeding changes within this session block
-            await db.commit()
-            print("Seeding operations committed.")
-
-        except Exception as seeding_error:
-            print(f"ERROR during seeding: {seeding_error}")
-            await db.rollback() # Rollback seeding session on error
-            raise # Re-raise the exception to fail the setup
-        finally:
-             print("Seeding session finished.") # Helps track flow
-
-    print("Database and test user setup complete.")
-
-    yield # Test runs here
-
-    # Teardown: Dispose engine after test function completes
-    print("\n--- Test Function Teardown --- ")
-    print("Disposing database engine for function...")
-    await test_engine.dispose()
-    print("Database engine disposed.")
-
+@pytest.fixture(scope="session")
+def event_loop(request):
+    """Create an instance of the default event loop for each test session."""
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+    yield loop
+    loop.close()
 
 @pytest_asyncio.fixture(scope="function")
-async def setup_invitation_dependencies(setup_database): # Depends on main setup
-    """Fixture to ensure necessary dependencies for invitation tests are available."""
-    # Retrieve IDs stored by setup_database
-    tenant_id = getattr(pytest, 'tenant_id', None)
-    tenant_admin_role_id = getattr(pytest, 'tenant_admin_role_id', None)
-    
-    if not tenant_id or not tenant_admin_role_id:
-        raise RuntimeError("Required tenant_id or tenant_admin_role_id not found in pytest attributes after setup_database.")
-        
-    print(f"setup_invitation_dependencies: tenant_id={tenant_id}, tenant_admin_role_id={tenant_admin_role_id}")
-    return {
-        "tenant_id": tenant_id,
-        "tenant_admin_role_id": tenant_admin_role_id
-    }
+async def engine() -> AsyncGenerator[AsyncEngine, None]:
+    """Creates an isolated async engine for each test with NullPool."""
+    # Access the TEST_DATABASE_URL attribute directly
+    test_db_dsn = settings.TEST_DATABASE_URL
+    if not test_db_dsn:
+        pytest.fail("TEST_DATABASE_URL could not be determined from settings. Ensure environment variables (e.g., TEST_POSTGRES_*) are set or TEST_DATABASE_URL is explicitly defined.")
 
+    # Convert the DSN object to a string for create_async_engine
+    test_db_url_str = str(test_db_dsn)
+
+    logger.info(f"[Test Setup] Creating engine for test with URL: {test_db_url_str}")
+    # Use NullPool to ensure no connections are carried over between tests
+    e = create_async_engine(test_db_url_str, poolclass=NullPool, echo=False)
+    try:
+        yield e
+    finally:
+        # Ensure engine disposal happens even if yield raises exception
+        if e is not None:
+            await e.dispose()
+            logger.info("[Test Teardown] Engine disposed.")
+
+@pytest_asyncio.fixture(scope="function")
+async def create_test_schema(engine: AsyncEngine) -> AsyncGenerator[AsyncConnection, None]:
+    """Fixture to drop/recreate schema using raw SQL + Alembic commands in a thread."""
+    schema_name = "iam" # Assuming 'iam' is the primary schema managed by Alembic
+    unique_id = id(create_test_schema)
+    logger.info(f"[Test Setup - {unique_id}] Acquiring connection and setting up schema '{schema_name}'.")
+    alembic_cfg = None # Initialize alembic_cfg
+    test_db_url_str = str(engine.url) # Get URL for env var
+
+    conn = await engine.connect()
+
+    try:
+        # 1. Drop/Create schema within a transaction
+        async with conn.begin():
+             logger.info(f"[Test Setup - {unique_id}] Dropping schema '{schema_name}' if exists (cascade).")
+             await conn.execute(DropSchema(schema_name, if_exists=True, cascade=True))
+             logger.info(f"[Test Setup - {unique_id}] Creating schema '{schema_name}'.")
+             await conn.execute(CreateSchema(schema_name, if_not_exists=True))
+             logger.info(f"[Test Setup - {unique_id}] Schema drop/create transaction committed.")
+
+        # 2. Use Alembic commands via asyncio.to_thread
+        logger.info(f"[Test Setup - {unique_id}] Configuring Alembic for upgrade command.")
+        alembic_cfg = AlembicConfig("alembic.ini")
+        # Point Alembic at our test DB URL directly (override ini)
+        alembic_cfg.set_main_option("sqlalchemy.url", test_db_url_str)
+        script_location = os.path.join(PROJECT_ROOT, "alembic")
+        alembic_cfg.set_main_option("script_location", script_location)
+
+        logger.info(f"[Test Setup - {unique_id}] Setting VIRTUALSTACK_TEST_DB_URL for Alembic thread: {test_db_url_str}")
+        os.environ["VIRTUALSTACK_TEST_DB_URL"] = test_db_url_str # Set env var
+
+        logger.info(f"[Test Setup - {unique_id}] Running Alembic upgrade command in thread...")
+        try:
+            # Run the synchronous Alembic command in a separate thread
+            await asyncio.to_thread(alembic.command.upgrade, alembic_cfg, "head")
+            logger.info(f"[Test Setup - {unique_id}] Alembic upgrade command thread finished.")
+        except Exception as e:
+             logger.error(f"[Test Setup - {unique_id}] Alembic upgrade command failed: {e}", exc_info=True)
+             raise
+        finally:
+             # Ensure env var is unset even if upgrade fails
+             if "VIRTUALSTACK_TEST_DB_URL" in os.environ:
+                 logger.info(f"[Test Setup - {unique_id}] Unsetting VIRTUALSTACK_TEST_DB_URL.")
+                 del os.environ["VIRTUALSTACK_TEST_DB_URL"]
+
+        # 3. Verify table existence *after* Alembic command thread completes
+        try:
+            # Use the connection established at the start of the fixture
+            await conn.execute(text(f"SELECT 1 FROM {schema_name}.tenants LIMIT 1"))
+            logger.info(f"[Test Setup - {unique_id}] Verified '{schema_name}.tenants' table exists post-Alembic command.")
+        except Exception as e:
+            logger.error(f"[Test Setup - {unique_id}] '{schema_name}.tenants' table not found after Alembic command: {e}", exc_info=True)
+            raise
+
+        logger.info(f"[Test Setup - {unique_id}] Schema setup complete. Yielding connection.")
+        yield conn # Yield the connection
+
+    except Exception as e:
+        logger.error(f"[Test Setup - {unique_id}] Error during schema setup phase: {e}", exc_info=True)
+        if conn and not conn.closed:
+            # Rollback might not be needed if error occurred before yielding
+            # await conn.rollback()
+            await conn.close()
+            logger.info(f"[Test Teardown - {unique_id}] Connection closed after setup error.")
+        raise
+    finally:
+        # Cleanup: Downgrade and drop schema (optional, but good practice)
+        # For now, focus on upgrade working. Add downgrade later if needed.
+        # if alembic_cfg: # Ensure config was created
+        #     try:
+        #         logger.info(f"[Test Teardown - {unique_id}] Running Alembic downgrade to base.")
+        #         alembic.command.downgrade(alembic_cfg, "base")
+        #         logger.info(f"[Test Teardown - {unique_id}] Alembic downgrade finished.")
+        #     except Exception as e:
+        #         logger.error(f"[Test Teardown - {unique_id}] Error during Alembic downgrade: {e}", exc_info=True)
+
+        # Ensure connection is closed even if downgrade fails
+        if conn and not conn.closed:
+             logger.info(f"[Test Teardown - {unique_id}] Closing connection yielded by create_test_schema.")
+             await conn.close()
+
+@pytest_asyncio.fixture(scope="function")
+async def db_session(create_test_schema: AsyncConnection) -> AsyncGenerator[AsyncSession, None]: # Changed return type hint
+    """Yields an AsyncSession backed by the connection from create_test_schema."""
+    conn = create_test_schema # The yielded connection
+    # Create a session bound to this connection
+    TestSession = sessionmaker(conn, class_=AsyncSession, expire_on_commit=False)
+    async with TestSession() as session:
+         logger.info(f"[Test Setup - {id(session)}] Yielding DB Session based on connection {id(conn)}.")
+         yield session
+         # Session is automatically closed by async context manager
+    logger.info(f"[Test Teardown - {id(session)}] db_session finished.")
+
+@pytest_asyncio.fixture(scope="function")
+async def seed_data(db_session: AsyncSession): # Now depends on the AsyncSession
+    """Seeds initial data like the default tenant, superuser, and core permissions."""
+    # Dependency on create_test_schema is now implicit via db_session
+    from src.virtualstack.services.iam.tenant import tenant_service
+    from src.virtualstack.services.iam.user import user_service
+    from src.virtualstack.schemas.iam.tenant import TenantCreate
+    from src.virtualstack.schemas.iam.user import UserCreate
+    from src.virtualstack.core.config import settings
+
+    unique_id = id(seed_data)
+    logger.info(f"[Test Setup - {unique_id}] Seeding initial data (tenant, superuser).")
+
+    try:
+        # Ensure default tenant exists - Use the new specific setting
+        tenant = await tenant_service.get_by_name(db_session, name=settings.DEFAULT_TEST_TENANT_NAME)
+        if not tenant:
+            logger.info(f"[Test Setup - {unique_id}] Default test tenant '{settings.DEFAULT_TEST_TENANT_NAME}' not found, creating.")
+            tenant_in = TenantCreate(name=settings.DEFAULT_TEST_TENANT_NAME)
+            tenant = await tenant_service.create(db_session, obj_in=tenant_in)
+            logger.info(f"[Test Setup - {unique_id}] Default test tenant created with ID: {tenant.id}.")
+        else:
+            logger.info(f"[Test Setup - {unique_id}] Default test tenant '{settings.DEFAULT_TEST_TENANT_NAME}' already exists with ID: {tenant.id}.")
+
+        # Ensure superuser exists
+        superuser = await user_service.get_by_email(db_session, email=settings.SUPERUSER_EMAIL)
+        if not superuser:
+            logger.info(f"[Test Setup - {unique_id}] Superuser '{settings.SUPERUSER_EMAIL}' not found, creating.")
+            user_in = UserCreate(
+                email=settings.SUPERUSER_EMAIL,
+                password=settings.SUPERUSER_PASSWORD,
+                first_name="Default",  # Add first_name to match the current schema
+                last_name="Superuser", # Add last_name to match the current schema
+                is_superuser=True # Explicitly set
+            )
+            # Update to use create instead of create_user and match parameter names
+            superuser = await user_service.create(db_session, obj_in=user_in, tenant_id=tenant.id)
+            logger.info(f"[Test Setup - {unique_id}] Superuser created with ID: {superuser.id}.")
+        else:
+            logger.info(f"[Test Setup - {unique_id}] Superuser '{settings.SUPERUSER_EMAIL}' already exists with ID: {superuser.id}.")
+
+        logger.info(f"[Test Setup - {unique_id}] Data seeding completed successfully.")
+        return {"tenant": tenant, "superuser": superuser} # Return seeded objects if needed
+
+    except Exception as e:
+        logger.error(f"[Test Setup - {unique_id}] Error during data seeding: {e}", exc_info=True)
+        raise
 
 # --- Application Fixtures ---
 
-
 @pytest.fixture(scope="function")
-def app(setup_database) -> FastAPI:
-    """Return FastAPI app instance for testing, overriding the DB dependency.
-    
-    Scope is function because it depends on setup_database which is function-scoped.
-    """
-    # Define the override function for get_db
-    async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
-        async with TestingSessionLocal() as session:
-            yield session
-    # Apply the override to the FastAPI app instance
-    fastapi_app.dependency_overrides[get_db] = override_get_db
-    return fastapi_app
+def app(db_session: AsyncSession) -> FastAPI: # Depends on AsyncSession
+    """Overrides dependencies for the FastAPI app for testing, depends on schema being ready."""
+    # Create a no-op rate limiter for tests
+    async def fake_rate_limiter():
+        """No-op rate limiter for testing."""
+        return None
 
+    # Override get_db to use the single connection provided by db_session fixture
+    async def override_get_db() -> AsyncGenerator[AsyncSession, None]: # Yield AsyncSession
+         logger.debug(f"[Dependency Override] Yielding session {id(db_session)} for get_db")
+         yield db_session
+         # Session lifecycle managed by db_session fixture
+
+    # More explicit dependency override setup
+    fastapi_app.dependency_overrides[login_rate_limiter] = fake_rate_limiter
+    fastapi_app.dependency_overrides[get_db] = override_get_db # Use the session override
+    logger.info(f"[Test Setup] FastAPI app configured with overridden dependencies (rate_limiter, get_db using session {id(db_session)}).")
+
+    yield fastapi_app
+
+    # Clean up overrides after test
+    fastapi_app.dependency_overrides = {}
+    logger.info("[Test Teardown] FastAPI dependency overrides cleared.")
 
 @pytest_asyncio.fixture(scope="function")
-async def async_client(app: FastAPI) -> AsyncClient:
-    """Provides a basic async client for unauthenticated requests."""
-    # Use httpx.AsyncClient with ASGITransport for async FastAPI testing
+async def client(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
+    """Provides an AsyncClient for making requests to the test app."""
+    # Use ASGITransport directly for FastAPI lifespan events
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
-        yield client
-
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        logger.info("[Test Setup] AsyncClient created.")
+        yield c
+    logger.info("[Test Teardown] AsyncClient closed.")
 
 # --- Authentication Fixtures ---
 
-
-@pytest.fixture(scope="session")
-def test_password() -> str:
-    """Provides the default test password."""
-    return settings.TEST_USER_PASSWORD
-
-
-@pytest_asyncio.fixture(scope="function")
-async def test_user() -> str:  # Return type changed to str (email)
-    """Provide the email of the default test admin user (function scope)."""
-    # This fixture no longer interacts with the DB.
-    # It relies on setup_database having created the user.
-    return settings.TEST_USER_EMAIL
-
-
-@pytest_asyncio.fixture(scope="function")
-async def authenticated_async_client_tenant_admin(
-    async_client: AsyncClient, # Use the base unauthenticated client
-    setup_database # Depend on setup_database
-) -> AsyncClient:
-    """Provides an authenticated async client logged in as the tenant admin user."""
-    # Ensure the necessary attributes were set during setup
-    if not hasattr(pytest, 'tenant_admin_user_email') or not hasattr(pytest, 'tenant_admin_user_password'):
-        raise RuntimeError("Tenant admin user credentials not found in pytest attributes. Setup failed?")
-
-    login_data = {
-        "username": pytest.tenant_admin_user_email,
-        "password": pytest.tenant_admin_user_password,
-    }
-    print(f"Attempting login for tenant admin user: {pytest.tenant_admin_user_email}")
-    # Use the base async_client to perform login
-    response = await async_client.post(
-        "/api/v1/auth/login/access-token",
-        data=login_data,
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-    )
-    if response.status_code != 200:
-        print(f"Login failed for tenant admin: {response.text}")
-        response.raise_for_status()
-
-    token_data = response.json()
-    access_token = token_data["access_token"]
-    headers = {
-        "Authorization": f"Bearer {access_token}"
-    }
-    # Add tenant header, likely required for tenant admin operations
-    if hasattr(pytest, 'tenant_id'):
-       headers["X-Tenant-ID"] = str(pytest.tenant_id)
-       print(f"Adding X-Tenant-ID header: {pytest.tenant_id} for tenant admin client")
-
-    # Create a NEW client instance for the tenant admin user
-    app_instance = async_client._transport.app # type: ignore
-    transport = ASGITransport(app=app_instance) # Create transport
-
-    tenant_admin_client = AsyncClient(
-        transport=transport, # Use transport instead
-        base_url=async_client.base_url,
-        headers=headers
-    )
-    print(f"Login successful for {pytest.tenant_admin_user_email}. NEW Client authenticated.")
-    # Yield the new client instance within its own context manager
-    async with tenant_admin_client:
-        yield tenant_admin_client
-
-
-# --- Test Clients ---
-
-@pytest.fixture(scope="session")
-def app() -> FastAPI:
-    """Returns the FastAPI app instance."""
-    return fastapi_app
-
-
-# Use httpx.AsyncClient for async tests
-@pytest_asyncio.fixture(scope="function") # Keep function scope for override
-async def async_client(app: FastAPI) -> AsyncGenerator[AsyncClient, None]: # Removed db_session injection
-    """Provides an asynchronous test client with db dependency override."""
-    # Define the override function to use TestingSessionLocal directly
-    async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
-        async with TestingSessionLocal() as session:
-             yield session
-             # No rollback needed here, request handler transactions are managed by get_db
-
-    # Apply the override
-    app.dependency_overrides[get_db] = override_get_db
-    print("Applied get_db dependency override using TestingSessionLocal.")
-
-    # Use ASGITransport for direct ASGI interaction
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        yield client
-
-    # Clean up the override after the test
-    del app.dependency_overrides[get_db]
-    print("Removed get_db dependency override.")
-
+# Remove test_password, test_user fixtures as they are superseded by seed_data
+# Remove authenticated_async_client_tenant_admin (use seed_data + test_user_client if needed)
 
 # --- Authentication Helpers ---
 
-async def get_user_token(async_client: AsyncClient, email: str, password: str) -> str:
-    """Helper function to authenticate a user and get a token."""
-    login_data = {"username": email, "password": password}
-    # Use headers for form data
-    headers = {"content-type": "application/x-www-form-urlencoded"}
-    r = await async_client.post("/api/v1/auth/login/access-token", data=login_data, headers=headers)
-    r.raise_for_status() # Raise exception for bad status codes
-    response = r.json()
-    assert "access_token" in response
-    return response["access_token"]
-
+# Remove _get_token and get_user_token helpers
+# async def _get_token(...)
+# async def get_user_token(...)
 
 # --- Authenticated Clients ---
 
+# Update authenticated clients to use tokens from seed_data
 @pytest_asyncio.fixture(scope="function")
-async def authenticated_async_client(async_client: AsyncClient) -> AsyncClient:
-    """Provides an authenticated async client (using the default test admin user)."""
-    print(f"Attempting login for user: {settings.TEST_USER_EMAIL}")
-    token = await get_user_token(
-        async_client,
-        settings.TEST_USER_EMAIL,
-        settings.TEST_USER_PASSWORD
-    )
-    async_client.headers = {"Authorization": f"Bearer {token}"}
-    # Add tenant header for default superuser client
-    if hasattr(pytest, "tenant_id") and pytest.tenant_id:
-        async_client.headers["X-Tenant-ID"] = str(pytest.tenant_id)
-        print(f"Adding X-Tenant-ID header: {pytest.tenant_id}")
-    else:
-        print("Warning: Tenant ID not available to set X-Tenant-ID header for superuser client.")
-    print(f"Login successful for {settings.TEST_USER_EMAIL}. Client authenticated.")
+async def authenticated_async_client(client: AsyncClient, seed_data: dict) -> AsyncClient:
+    """Provides an authenticated async client (using the seeded superuser's token)."""
+    superuser = seed_data.get("superuser")
+    tenant = seed_data.get("tenant")
+    if not superuser or not tenant:
+        pytest.fail("Seeding failed to provide superuser or tenant objects.")
+
+    logger.info("[Test Setup] Getting token for authenticated_async_client (superuser)...")
+    login_data = {
+        "username": settings.SUPERUSER_EMAIL,
+        "password": settings.SUPERUSER_PASSWORD,
+    }
+    token_url = "/api/v1/auth/token"
+    response = None
+    try:
+        response = await client.post(
+            token_url,
+            data=login_data,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        response.raise_for_status()
+        token_data = response.json()
+        access_token = token_data["access_token"]
+        
+        # Set headers on the client instance
+        client.headers["Authorization"] = f"Bearer {access_token}"
+        # Set tenant header for superuser tests, using the seeded tenant ID
+        client.headers["X-Tenant-ID"] = str(tenant.id)
+        logger.info(f"[Test Setup] authenticated_async_client ready (Superuser, Tenant: {tenant.id}).")
+        return client # Return the configured client
+    except Exception as e:
+        logger.error(f"[Test Setup] Failed to authenticate client: {e}", exc_info=True)
+        if response is not None:
+             logger.error(f"Login response status: {response.status_code}")
+             try:
+                 logger.error(f"Login response body: {response.json()}")
+             except Exception:
+                 logger.error(f"Login response body (non-JSON): {response.text}")
+        pytest.fail(f"Failed to authenticate client: {e}")
+
+@pytest_asyncio.fixture(scope="function")
+async def authenticated_async_client_user2(async_client: AsyncClient, seed_data: dict) -> AsyncClient:
+    """Provides an authenticated async client (using the second test user's token from seed_data)."""
+    token = seed_data["test_user_token"]
+    tenant = seed_data["tenant"]
+    async_client.headers["Authorization"] = f"Bearer {token}"
+    async_client.headers["X-Tenant-ID"] = str(tenant.id)
+    logging.info(f"Authenticated client created for test user 2 using seeded token.")
     return async_client
 
-@pytest_asyncio.fixture(scope="function")
-async def authenticated_async_client_user2(async_client: AsyncClient) -> AsyncClient:
-    """Provides an authenticated async client (using the second test user)."""
-    assert hasattr(pytest, "user2_email"), "user2_email not set by setup_database"
-    assert hasattr(pytest, "user2_password"), "user2_password not set by setup_database"
-    email = pytest.user2_email
-    password = pytest.user2_password
-    print(f"Attempting login for user: {email}")
-    token = await get_user_token(async_client, email, password)
-    # Create a *new* client instance to avoid header conflicts
-    async with AsyncClient(transport=async_client._transport, base_url=async_client.base_url) as client:
-        client.headers = {"Authorization": f"Bearer {token}"}
-        if hasattr(pytest, "tenant_id") and pytest.tenant_id:
-            client.headers["X-Tenant-ID"] = str(pytest.tenant_id)
-            print(f"Adding X-Tenant-ID header: {pytest.tenant_id} for user2 client")
-        print(f"Login successful for {email}. NEW Client authenticated.")
-        yield client
-
-
-@pytest_asyncio.fixture(scope="function")
-async def authenticated_async_client_tenant_admin(async_client: AsyncClient) -> AsyncClient:
-    """Provides an authenticated async client (using the tenant admin user)."""
-    email = "tenantadmin@virtualstack.example"
-    password = "testpassword789!"
-    print(f"Attempting login for user: {email}")
-    token = await get_user_token(async_client, email, password)
-    async with AsyncClient(transport=async_client._transport, base_url=async_client.base_url) as client:
-        client.headers = {"Authorization": f"Bearer {token}"}
-        if hasattr(pytest, "tenant_id") and pytest.tenant_id:
-            client.headers["X-Tenant-ID"] = str(pytest.tenant_id)
-            print(f"Adding X-Tenant-ID header: {pytest.tenant_id} for tenant admin client")
-        print(f"Login successful for {email}. NEW Client authenticated.")
-        yield client
-
 # --- Specific Test Dependencies ---
-
+# Keep setup_invitation_dependencies for now, but it might need review later
 @pytest.fixture(scope="function")
-def setup_invitation_dependencies() -> dict:
+def setup_invitation_dependencies(seed_data: dict) -> dict:
     """Provides necessary dependencies (tenant_id, role_id) for invitation tests."""
-    assert hasattr(pytest, "tenant_id"), "tenant_id not set by setup_database fixture"
-    assert hasattr(pytest, "tenant_admin_role_id"), "tenant_admin_role_id not set by setup_database fixture"
-
+    tenant = seed_data["tenant"]
+    tenant_admin_role = seed_data["tenant_admin_role"]
     return {
-        "tenant_id": pytest.tenant_id,
-        "role_id": pytest.tenant_admin_role_id # Use the Tenant Admin role created in setup
+        "tenant_id": tenant.id,
+        "role_id": tenant_admin_role.id
     }
 
+# Remove old Test Clients fixtures (admin_client, test_user_client)
+# They are effectively replaced by authenticated_async_client and authenticated_async_client_user2
+# @pytest_asyncio.fixture(scope="function")
+# async def admin_client(...)
+# @pytest_asyncio.fixture(scope="function")
+# async def test_user_client(...)
 
-# Make sure setup_database runs automatically before other fixtures if needed
-@pytest_asyncio.fixture(autouse=True)
-async def ensure_db_setup(setup_database):
-    # This fixture doesn't do anything itself,
-    # but ensures setup_database runs because of autouse=True
-    pass
+# Fixture to get authentication token for the superuser
+@pytest_asyncio.fixture(scope="function")
+async def superuser_token_headers(client: AsyncClient, seed_data: dict) -> dict[str, str]:
+    """Generates authentication token headers for the seeded superuser by logging in."""
+    logger.info("[Test Setup] Getting token for superuser_token_headers...")
+    login_data = {
+        "username": settings.SUPERUSER_EMAIL,
+        "password": settings.SUPERUSER_PASSWORD,
+    }
+    token_url = "/api/v1/auth/token"
+    response = None
+    try:
+        # Use the *base* client fixture which doesn't have preset headers
+        async with AsyncClient(transport=ASGITransport(app=fastapi_app), base_url="http://test") as temp_client:
+            response = await temp_client.post(
+                token_url,
+                data=login_data,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            response.raise_for_status()
+            token_data = response.json()
+            access_token = token_data["access_token"]
 
-# Teardown logic (already handled by setup_database fixture)
-# No explicit teardown fixture needed here as setup_database handles drop/create
+            headers = {
+                "Authorization": f"Bearer {access_token}",
+                "X-Tenant-ID": str(seed_data["tenant"].id)
+            }
+            logger.info(f"[Test Setup] superuser_token_headers generated (Tenant: {seed_data['tenant'].id}).")
+            return headers
+    except Exception as e:
+        logger.error(f"[Test Setup] Failed to get token for superuser_token_headers: {e}", exc_info=True)
+        if response is not None:
+             logger.error(f"Login response status: {response.status_code}")
+             try:
+                 logger.error(f"Login response body: {response.json()}")
+             except Exception:
+                 logger.error(f"Login response body (non-JSON): {response.text}")
+        pytest.fail(f"Failed to get token for superuser_token_headers: {e}")

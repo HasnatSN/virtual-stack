@@ -10,7 +10,12 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # Set PYTHONPATH
-export PYTHONPATH="$PYTHONPATH:$(pwd)/src"
+export PYTHONPATH="${PYTHONPATH:-}:$(pwd)/src"
+
+# Ensure migrations are applied against the DEV database (defined by DATABASE_URL in .env)
+echo "Applying Alembic migrations..."
+alembic upgrade head
+echo "Migrations applied."
 
 # Run the server
 echo "Starting development server..."

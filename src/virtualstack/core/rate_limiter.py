@@ -1,105 +1,94 @@
-from collections import defaultdict
 import time
-from typing import Optional
+import redis.asyncio as redis
+from fastapi import Request, Depends, HTTPException, status
+from typing import Callable, Optional
+from functools import wraps
 
-from fastapi import HTTPException, Request, status
+from virtualstack.core.config import settings # Assuming Redis URL is in settings
 
-from virtualstack.core.config import settings # Import settings
+# TODO: Configure Redis connection properly, maybe move to deps?
+r = redis.from_url(settings.REDIS_URL or f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}", decode_responses=True)
 
-
-# Simple in-memory rate limiter
-# Format: {key: [(timestamp1, count1), (timestamp2, count2), ...]}
-rate_limit_store: dict[str, list] = defaultdict(list)
-
-
-def _clean_old_requests(key: str, window_seconds: int) -> None:
-    """Clean up old requests outside the time window."""
-    current_time = time.time()
-    # Keep only entries within the time window
-    rate_limit_store[key] = [
-        (timestamp, count)
-        for timestamp, count in rate_limit_store.get(key, [])
-        if current_time - timestamp < window_seconds
-    ]
-
-
-def _add_request(key: str) -> None:
-    """Add a new request to the rate limit store."""
-    current_time = time.time()
-
-    # Try to find the current second in the store
-    for i, (timestamp, count) in enumerate(rate_limit_store.get(key, [])):
-        if abs(current_time - timestamp) < 1.0:  # Same second
-            # Update the count
-            rate_limit_store[key][i] = (timestamp, count + 1)
-            return
-
-    # No matching second found, add a new entry
-    rate_limit_store[key].append((current_time, 1))
-
-
-def _get_total_requests(key: str) -> int:
-    """Get the total number of requests within the time window."""
-    return sum(count for _, count in rate_limit_store.get(key, []))
-
-
-def rate_limit(
-    max_requests: int = 10, window_seconds: int = 60, key_func: Optional[callable] = None
-):
-    """Rate limit requests based on a key.
+def rate_limit(max_requests: int, window_seconds: int):
+    """
+    Decorator factory for rate limiting API endpoints using Redis.
 
     Args:
-        max_requests: Maximum number of requests allowed within the window
-        window_seconds: Time window in seconds
-        key_func: Function to extract a key from the request (defaults to client IP)
+        max_requests: Maximum number of requests allowed.
+        window_seconds: Time window in seconds.
     """
 
-    async def rate_limit_dependency(request: Request):
-        # Bypass rate limiting for test environment
-        if settings.RUN_ENV == "test":
-            return True
+    def decorator(func: Callable):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            # The actual dependency function that FastAPI resolves
+            request: Optional[Request] = kwargs.get('request')
+            if not request:
+                 # Try finding request in args if not in kwargs (e.g., direct call)
+                 for arg in args:
+                      if isinstance(arg, Request):
+                           request = arg
+                           break
+            
+            if not request:
+                # Should not happen in normal FastAPI flow, but defensively handle
+                print("Rate limiter: Could not find Request object.")
+                # Allow request if context is unclear?
+                # Or raise an internal server error?
+                # raise HTTPException(status_code=500, detail="Rate limiter context error")
+                return await func(*args, **kwargs) # Proceed without limiting for now
 
-        # Get a key to identify the client
-        if key_func:
-            key = key_func(request)
-        else:
-            # Default to client IP
+            # Generate a unique key for the client
+            # Use X-Forwarded-For if present (common in proxied setups), else client IP
             forwarded = request.headers.get("X-Forwarded-For")
-            key = forwarded.split(",")[0].strip() if forwarded else request.client.host
+            client_host = request.client.host if request.client else "unknown_client" # <<< ADDED CHECK for request.client
+            identifier = forwarded.split(",")[0].strip() if forwarded else client_host
+            
+            if not identifier:
+                 print("Rate limiter: Could not identify client.")
+                 # Allow request if client is unidentified?
+                 return await func(*args, **kwargs) # Proceed without limiting
 
-        # Clean old requests
-        _clean_old_requests(key, window_seconds)
+            # Use the endpoint path and identifier for the Redis key
+            endpoint_path = request.url.path
+            key = f"rate_limit:{endpoint_path}:{identifier}"
 
-        # Get current request count
-        total_requests = _get_total_requests(key)
+            # Use Redis pipeline for atomic operations
+            async with r.pipeline() as pipe:
+                # Record the current request timestamp
+                current_time = time.time()
+                pipe.zadd(key, {str(current_time): current_time})
+                # Remove timestamps outside the window
+                pipe.zremrangebyscore(key, 0, current_time - window_seconds)
+                # Count remaining requests in the window
+                pipe.zcard(key)
+                # Set expiry for the key to clean up Redis
+                pipe.expire(key, window_seconds)
 
-        # Check if rate limit exceeded
-        if total_requests >= max_requests:
-            # Calculate time to wait until reset
-            oldest_timestamp = min(
-                [timestamp for timestamp, _ in rate_limit_store.get(key, [])], default=time.time()
-            )
-            retry_after = int(window_seconds - (time.time() - oldest_timestamp))
+                results = await pipe.execute()
 
-            headers = {
-                "Retry-After": str(max(1, retry_after)),
-                "X-RateLimit-Limit": str(max_requests),
-                "X-RateLimit-Remaining": "0",
-                "X-RateLimit-Reset": str(int(time.time() + retry_after)),
-            }
+            request_count = results[2] # Result of zcard
 
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"Rate limit exceeded. Try again in {retry_after} seconds.",
-                headers=headers,
-            )
+            if request_count > max_requests:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="Too Many Requests",
+                    headers={"Retry-After": str(window_seconds)} # Inform client
+                )
+            
+            # If the original function was passed via depends, we just return None
+            # If used as a direct decorator, call the original function
+            # This implementation assumes usage as a dependency, returning None on success.
+            # To use as a direct decorator, modify the end.
+            # For dependency usage:
+            # return None 
+            # Let's assume dependency usage for login endpoint:
+            return None # Indicate success for dependency check
 
-        # Add the current request
-        _add_request(key)
+        # Return the dependency function itself
+        return wrapper
 
-        # Add rate limit headers
-        request.state.rate_limit_remaining = max_requests - total_requests - 1
-
-        return True
-
-    return rate_limit_dependency
+# Example of how to use it as a dependency in an endpoint:
+# @router.post("/login")
+# async def login(form_data: OAuth2PasswordRequestForm = Depends(), _: None = Depends(rate_limit(5, 60))):
+#    ...

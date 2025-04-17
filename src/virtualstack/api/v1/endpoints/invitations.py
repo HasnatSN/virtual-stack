@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
     "/",
     response_model=InvitationCreateResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(deps.require_permission(Permission.TENANT_MANAGE_INVITATIONS))]
+    dependencies=[Depends(deps.require_permission_in_active_tenant(Permission.TENANT_MANAGE_INVITATIONS))]
 )
 async def create_invitation(
     *,
@@ -230,7 +230,7 @@ async def verify_invitation_token(
 @router.get(
     "/{invitation_id}",
     response_model=InvitationDetailResponse, # Use DetailResponse to include extra info
-    dependencies=[Depends(deps.require_permission(Permission.TENANT_MANAGE_INVITATIONS))] # TODO: Revisit permission?
+    # Remove the dependency as permission is checked manually inside
 )
 async def read_invitation(
     *,
@@ -295,7 +295,7 @@ async def read_invitation(
     "/{invitation_id}/revoke",
     response_model=InvitationResponse, # Return the revoked invitation status
     status_code=status.HTTP_200_OK, # Return 200 OK on success
-    dependencies=[Depends(deps.require_permission(Permission.TENANT_MANAGE_INVITATIONS))]
+    # Remove the dependency as permission is checked manually inside
 )
 async def revoke_invitation(
     *,

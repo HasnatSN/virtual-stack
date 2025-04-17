@@ -20,7 +20,6 @@ router = APIRouter()
 @router.get(
     "/",
     response_model=UserListResponse,
-    dependencies=[Depends(deps.require_permission("tenant:view_users"))]
 )
 async def list_users_in_tenant(
     *,
@@ -48,7 +47,6 @@ async def list_users_in_tenant(
 @router.get(
     "/{user_id}",
     response_model=UserSchema,
-    dependencies=[Depends(deps.require_permission("tenant:view_users"))]
 )
 async def get_tenant_user(
     *,

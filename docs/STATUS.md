@@ -63,11 +63,12 @@
 - [x] Role functional tests (`tests/functional/test_roles.py`) - Basic CRUD passing. Permission management tests need verification.
 - [ ] Role assignment tests (`tests/functional/test_role_assignments.py`) - **BLOCKED/FAILING** during setup (`conftest.py`) due to `OSError: [Errno 61] Connection refused` when trying to connect to the test database (`localhost:5434`). Previous issues (FK violation, routing, permissions, imports) resolved.
 - [ ] Invitation functional tests (`tests/functional/test_invitations.py`) - **PAUSED** (Module commented out).
+- [ ] Pytest full suite execution (halting due to missing `client` fixture in `scripts/test_api_basic.py`)
 - [ ] Achieve >80% test coverage
 
 **Current Blocker (Highest Priority):**
 
-*   **RESOLVED:** The `db_test` container was not running. Started it using `docker-compose up -d`. Connection should now work.
+*   **BLOCKER:** pytest halts due to missing `client` fixture in `scripts/test_api_basic.py`. Fix fixture or exclude scripts from discovery.
 
 **Other Issues (Lower Priority / Paused):**
 
@@ -78,6 +79,7 @@
 ## Key TODOs / Next Steps (Refocused)
 
 1.  **Run and Verify Tests (High Priority):**
+    *   Fix pytest discovery error in `scripts/test_api_basic.py` (missing fixture 'client').
     *   Execute `test_role_assignments.py` and resolve any remaining failures (e.g., logic errors now that connection/setup issues are fixed).
     *   Add and run tests for the new list/get user endpoints.
     *   Verify role permission management tests (`test_roles.py`).

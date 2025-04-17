@@ -40,11 +40,13 @@ class TenantService(CRUDBase[Tenant, TenantCreate, TenantUpdate]):
         return result.scalars().first()
 
     async def create(self, db: AsyncSession, *, obj_in: TenantCreate) -> Tenant:
-        """Create a new tenant."""
+        """Create a new tenant. Does not commit the transaction.
+        Relies on the caller (lifespan event) to commit.
+        """
         obj_in_data = jsonable_encoder(obj_in)
         db_obj = self.model(**obj_in_data)
         db.add(db_obj)
-        await db.commit()
+        await db.flush()
         await db.refresh(db_obj)
         return db_obj
 

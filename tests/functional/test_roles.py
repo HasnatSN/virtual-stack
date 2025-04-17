@@ -142,14 +142,14 @@ async def test_delete_role(authenticated_async_client: AsyncClient):
 async def test_add_permission_to_role_success(
     authenticated_async_client: AsyncClient,
     db_session: AsyncSession, # Inject db for verification
-    test_role: dict # Use the fixture role
+    test_role: dict, # Use the fixture role
+    seed_data: dict # Inject seeded data to get permission ID
 ) -> None:
     """Test successfully adding a permission to the fixture role."""
     role_id = test_role["id"]
-    # Use the seeded permission ID from pytest attribute
-    assert hasattr(pytest, "seeded_permission_id_vm_read"), "Seeded permission ID not set in conftest"
-    permission_id_to_add = pytest.seeded_permission_id_vm_read
-    assert permission_id_to_add is not None, "VM_READ permission was not seeded correctly."
+    # Use the seeded permission ID from seed_data fixture
+    permission_id_to_add = seed_data.get("vm_read_permission_id")
+    assert permission_id_to_add is not None, "vm:read permission ID was not found in seed_data fixture results."
 
     endpoint = f"/api/v1/roles/{role_id}/permissions"
     response = await authenticated_async_client.post(
@@ -177,14 +177,14 @@ async def test_add_permission_to_role_success(
 @pytest.mark.asyncio
 async def test_list_role_permissions_success(
     authenticated_async_client: AsyncClient,
-    test_role: dict # Use the fixture role
+    test_role: dict, # Use the fixture role
+    seed_data: dict # Inject seeded data to get permission ID
 ) -> None:
     """Test listing permissions for the fixture role after adding one."""
     role_id = test_role["id"]
-    # Use the seeded permission ID from pytest attribute
-    assert hasattr(pytest, "seeded_permission_id_vm_read"), "Seeded permission ID not set in conftest"
-    permission_id_added = pytest.seeded_permission_id_vm_read
-    assert permission_id_added is not None, "VM_READ permission was not seeded correctly."
+    # Use the seeded permission ID from seed_data fixture
+    permission_id_added = seed_data.get("vm_read_permission_id")
+    assert permission_id_added is not None, "vm:read permission ID was not found in seed_data fixture results."
 
     # Add the permission first for this isolated test
     add_endpoint = f"/api/v1/roles/{role_id}/permissions"
@@ -209,14 +209,14 @@ async def test_list_role_permissions_success(
 async def test_remove_permission_from_role_success(
     authenticated_async_client: AsyncClient,
     db_session: AsyncSession, # Inject db for verification
-    test_role: dict # Use the fixture role
+    test_role: dict, # Use the fixture role
+    seed_data: dict # Inject seeded data to get permission ID
 ) -> None:
     """Test successfully removing a permission from the fixture role."""
     role_id = test_role["id"]
-    # Use the seeded permission ID from pytest attribute
-    assert hasattr(pytest, "seeded_permission_id_vm_read"), "Seeded permission ID not set in conftest"
-    permission_id_to_remove = pytest.seeded_permission_id_vm_read
-    assert permission_id_to_remove is not None, "VM_READ permission was not seeded correctly."
+    # Use the seeded permission ID from seed_data fixture
+    permission_id_to_remove = seed_data.get("vm_read_permission_id")
+    assert permission_id_to_remove is not None, "vm:read permission ID was not found in seed_data fixture results."
 
     # Add the permission first to ensure it exists
     add_endpoint = f"/api/v1/roles/{role_id}/permissions"
@@ -258,3 +258,36 @@ async def test_remove_permission_from_role_success(
     assert response_again.status_code == status.HTTP_404_NOT_FOUND, "Expected 404 on second delete call"
 
 # TODO: Add failure tests for role permission management (e.g., add non-existent permission, remove non-assigned permission)
+
+@pytest.mark.asyncio
+async def test_update_role_users(authenticated_async_client: AsyncClient, test_role: dict, seed_data: dict):
+    """Test updating a role's assigned users."""
+    role_id = test_role["id"]
+    # Ensure users exist - get superuser and potentially create another test user
+    superuser_id = seed_data["superuser"].id
+    # TODO: Create a second user in seed_data or a dedicated fixture for user management tests
+    # For now, just assign the superuser
+    user_ids_to_set = [str(superuser_id)]
+
+    endpoint = f"/api/v1/roles/{role_id}/users"
+    response = await authenticated_async_client.put(
+        endpoint,
+        json={"user_ids": user_ids_to_set}
+    )
+    assert response.status_code == status.HTTP_204_NO_CONTENT, f"Failed: {response.text}"
+
+    # Verification (optional, could be done via DB or GET /roles/{role_id}/users)
+    # Verify in DB
+    # from virtualstack.models.iam.user_roles import user_roles_table
+    # stmt = select(func.count(user_roles_table.c.user_id)).where(
+    #     user_roles_table.c.role_id == uuid.UUID(role_id)
+    # )
+    # result = await db_session.execute(stmt)
+    # count = result.scalar_one()
+    # assert count == len(user_ids_to_set)
+
+# TODO: Add test for Get Users Assigned to Role (/roles/{role_id}/users GET)
+# TODO: Add test for updating role with invalid user ID
+# TODO: Add test for updating role with system role (should fail)
+# TODO: Add test for deleting role with assigned users (should fail)
+# TODO: Add negative tests for permission assignment (invalid role/permission ID)

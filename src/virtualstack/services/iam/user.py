@@ -21,6 +21,8 @@ from virtualstack.core.exceptions import AuthorizationError, ValidationError, No
 
 logger = logging.getLogger(__name__) # Setup logger
 
+DEFAULT_ROLE_NAME = "Default User Role" # Define default role name constant
+
 class UserService(CRUDBase[User, UserCreate, UserUpdate]):
     """Service for user management."""
 
@@ -30,58 +32,93 @@ class UserService(CRUDBase[User, UserCreate, UserUpdate]):
         result = await db.execute(stmt)
         return result.scalars().first()
 
-    async def create(self, db: AsyncSession, *, obj_in: UserCreate, tenant_id: UUID) -> User:
-        """Create a new user and associate them with the specified tenant."""
+    async def create(self, db: AsyncSession, *, obj_in: UserCreate, tenant_id: UUID, autocommit: bool = False) -> User:
+        logger.debug(f"[UserService.create] ENTER - Email: {obj_in.email}, Tenant ID: {tenant_id}")
+        db_user = None # Initialize db_user
         # 1. Create the User object
-        db_user = User(
-            email=obj_in.email,
-            hashed_password=create_password_hash(obj_in.password),
-            first_name=obj_in.first_name,
-            last_name=obj_in.last_name,
-            is_superuser=obj_in.is_superuser,
-            is_active=obj_in.is_active,
-        )
-        db.add(db_user)
-
         try:
-            # Commit to get the user ID
-            await db.commit()
-            await db.refresh(db_user)
+            hashed_password = create_password_hash(obj_in.password)
+            logger.debug(f"[UserService.create] Password hashed for {obj_in.email}")
+            # Construct full_name from first_name and last_name
+            full_name = f"{obj_in.first_name} {obj_in.last_name}".strip()
+            db_user = User(
+                email=obj_in.email,
+                hashed_password=hashed_password,
+                full_name=full_name, # Use full_name matching the model column
+                is_superuser=obj_in.is_superuser,
+                is_active=obj_in.is_active,
+            )
+            logger.debug(f"[UserService.create] User object created for {obj_in.email} (full_name='{full_name}'). Adding to session...")
+            db.add(db_user)  # EXPLICITLY add user to session
+            logger.debug(f"[UserService.create] User object for {obj_in.email} added to session. Flushing...")
+            # Flush to get the user ID without committing the transaction
+            await db.flush()
+            logger.debug(f"[UserService.create] Flush successful for {obj_in.email}. Refreshing ID...")
+            await db.refresh(db_user, attribute_names=['id']) # Refresh just the ID
+            logger.info(f"[UserService.create] User record flushed for {obj_in.email}. ID: {db_user.id}")
+
         except IntegrityError as e:
-            await db.rollback()
-            # Check if it's a unique constraint violation on email
-            if "unique constraint" in str(e).lower() and "users_email_key" in str(e).lower():
+            logger.error(f"[UserService.create] IntegrityError during user flush for {obj_in.email}: {e}", exc_info=True)
+            await db.rollback() # Rollback if flush fails
+            if "users_email_key" in str(e).lower():
                  raise ValidationError(f"User with email {obj_in.email} already exists.")
             else:
-                 logger.error(f"Database integrity error creating user {obj_in.email}: {e}", exc_info=True)
-                 raise # Re-raise other integrity errors
+                 raise
         except Exception as e:
+            logger.error(f"[UserService.create] Exception during user flush for {obj_in.email}: {e}", exc_info=True)
             await db.rollback()
-            logger.error(f"Error creating user {obj_in.email}: {e}", exc_info=True)
+            # Ensure db_user is None if creation failed before flush
+            db_user = None
             raise
 
-        # 2. Create the TenantUserAssociation
-        # TODO: Should new users automatically get a default role in the tenant?
-        #       If so, need to fetch the default role ID and add it here.
-        #       For now, just associating user with tenant, no role assigned yet.
-        db_assoc = UserTenantRole(user_id=db_user.id, tenant_id=tenant_id)
-        db.add(db_assoc)
+        # Ensure user creation succeeded
+        if not db_user or not db_user.id:
+             logger.error("[UserService.create] User object or ID is missing after flush. Aborting tenant association.")
+             # Consider raising a specific error here
+             raise RuntimeError("Failed to create user record properly.")
 
+        # 2. Fetch the Default Role ID
+        logger.debug(f"[UserService.create] Fetching default role ID for name: {DEFAULT_ROLE_NAME}")
+        default_role = await role_service.get_by_name_in_tenant(db, name=DEFAULT_ROLE_NAME, tenant_id=tenant_id)
+        if not default_role:
+             logger.error(f"[UserService.create] Default role '{DEFAULT_ROLE_NAME}' not found in tenant {tenant_id}! Cannot assign role to new user {db_user.id}.")
+             # Depending on requirements, we might rollback the user creation or raise
+             # For now, let's raise an error as association is likely required.
+             # Consider rolling back the user creation if it should be atomic with role assignment
+             # await db.rollback() # Potentially rollback user creation here
+             raise ValueError(f"Default role '{DEFAULT_ROLE_NAME}' not found in tenant {tenant_id}.")
+        default_role_id = default_role.id
+        logger.debug(f"[UserService.create] Found default role ID: {default_role_id}")
+
+        # 3. Create the TenantUserAssociation WITH Role ID
+        logger.debug(f"[UserService.create] Creating tenant association for user {db_user.id}, tenant {tenant_id}, role {default_role_id}...")
         try:
-            await db.commit()
-            # No refresh needed for association unless it has defaults
+            db_assoc = UserTenantRole(
+                user_id=db_user.id,
+                tenant_id=tenant_id,
+                role_id=default_role_id # Include the role_id
+            )
+            logger.debug(f"[UserService.create] Association object created. Adding to session...")
+            db.add(db_assoc)  # EXPLICITLY add association to session
+            logger.debug(f"[UserService.create] Association added to session for user {db_user.id}. Flushing...")
+            await db.flush() # Flush the association
+            logger.info(f"[UserService.create] Tenant association flushed for user {db_user.id}, tenant {tenant_id}, role {default_role_id}.")
         except IntegrityError as e:
+            logger.error(f"[UserService.create] IntegrityError during tenant association flush for user {db_user.id}, tenant {tenant_id}, role {default_role_id}: {e}", exc_info=True)
             await db.rollback()
-            # This might happen if tenant_id is invalid (FK violation) or if the pair already exists (rare)
-            logger.error(f"Error creating tenant association for user {db_user.id} and tenant {tenant_id}: {e}", exc_info=True)
-            # Optional: Could attempt to delete the just-created user here for cleanup,
-            # but might be better to let the caller handle the overall transaction.
-            raise ValidationError(f"Could not associate user with tenant {tenant_id}. Invalid tenant?", error_type="tenant_association_failed")
+            # Raise the original custom ValidationError (assuming it only takes message)
+            raise ValidationError(f"Could not associate user with tenant {tenant_id} and role {default_role_id}. Invalid tenant/role or duplicate entry?") from e
         except Exception as e:
+            logger.error(f"[UserService.create] Exception during tenant association flush for user {db_user.id}, tenant {tenant_id}, role {default_role_id}: {e}", exc_info=True)
             await db.rollback()
-            logger.error(f"Error committing tenant association for user {db_user.id}: {e}", exc_info=True)
             raise
 
+        # Only commit if explicitly requested
+        if autocommit:
+            logger.debug(f"[UserService.create] Autocommit=True, committing transaction...")
+            await db.commit()
+            
+        logger.debug(f"[UserService.create] EXIT - Returning user {db_user.id}")
         return db_user
 
     async def update(
@@ -137,7 +174,32 @@ class UserService(CRUDBase[User, UserCreate, UserUpdate]):
         # Apply ordering, offset, and limit for the final user list
         users_query = base_query.order_by(User.email).offset(skip).limit(limit)
         users_result = await db.execute(users_query)
-        users = users_result.scalars().all()
+        users: List[User] = users_result.scalars().all()
+
+        # --- Fetch Roles for the retrieved users --- #
+        user_roles_map: Dict[UUID, List[str]] = {}
+        if users:
+            user_ids = [user.id for user in users]
+            roles_stmt = (
+                select(UserTenantRole.user_id, Role.name)
+                .join(Role, UserTenantRole.role_id == Role.id)
+                .where(
+                    UserTenantRole.tenant_id == tenant_id,
+                    UserTenantRole.user_id.in_(user_ids)
+                )
+            )
+            roles_result = await db.execute(roles_stmt)
+            for user_id, role_name in roles_result.all():
+                if user_id not in user_roles_map:
+                    user_roles_map[user_id] = []
+                user_roles_map[user_id].append(role_name)
+
+        # Attach roles to user objects (dynamically adding attribute for schema mapping)
+        for user in users:
+            user.roles = user_roles_map.get(user.id, []) # Add roles attribute
+
+        # TODO: Ensure the User schema validation handles the dynamically added 'roles' attribute correctly.
+        #       Since model_config has from_attributes=True, it should work.
 
         return users, total_count
 
@@ -152,7 +214,7 @@ class UserService(CRUDBase[User, UserCreate, UserUpdate]):
         result = await db.execute(stmt)
         return result.scalars().first()
 
-    async def delete(self, db: AsyncSession, *, record_id: UUID, tenant_id: UUID) -> int:
+    async def delete(self, db: AsyncSession, *, record_id: UUID, tenant_id: UUID, autocommit: bool = False) -> int:
         """Removes a user's association with a specific tenant. Returns number of associations removed (0 or 1)."""
         # TODO: Check if user has critical roles before removing association?
         # TODO: What happens if user has resources in this tenant? Should this be allowed?
@@ -162,7 +224,8 @@ class UserService(CRUDBase[User, UserCreate, UserUpdate]):
             .where(UserTenantRole.tenant_id == tenant_id)
         )
         result = await db.execute(stmt)
-        await db.commit()
+        if autocommit:
+            await db.commit()
         # If result.rowcount is 0, it means the association didn't exist.
         # Consider raising NotFoundError if the association was expected to exist?
         if result.rowcount == 0:
@@ -171,7 +234,7 @@ class UserService(CRUDBase[User, UserCreate, UserUpdate]):
         return result.rowcount
 
     async def assign_role_to_user_in_tenant(
-        self, db: AsyncSession, *, user_id: UUID, role_id: UUID, tenant_id: UUID
+        self, db: AsyncSession, *, user_id: UUID, role_id: UUID, tenant_id: UUID, autocommit: bool = False
     ) -> bool:
         """Assigns a role to a user within a tenant. Returns True if assigned, False if already exists."""
         # Validation: Check if user, role, and tenant exist and are related
@@ -198,7 +261,8 @@ class UserService(CRUDBase[User, UserCreate, UserUpdate]):
         new_assignment = UserTenantRole(user_id=user_id, tenant_id=tenant_id, role_id=role_id)
         db.add(new_assignment)
         try:
-            await db.commit()
+            if autocommit:
+                await db.commit()
         except IntegrityError as e:
              await db.rollback()
              logger.error(f"Integrity error assigning role {role_id} to user {user_id} in tenant {tenant_id}: {e}", exc_info=True)
@@ -212,7 +276,7 @@ class UserService(CRUDBase[User, UserCreate, UserUpdate]):
         return True
 
     async def remove_role_from_user_in_tenant(
-        self, db: AsyncSession, *, user_id: UUID, role_id: UUID, tenant_id: UUID
+        self, db: AsyncSession, *, user_id: UUID, role_id: UUID, tenant_id: UUID, autocommit: bool = False
     ) -> int:
         """Removes a specific role assignment from a user within a tenant. Returns rows deleted."""
         # Optional Validation: Check if user/role/tenant exist first?
@@ -228,7 +292,8 @@ class UserService(CRUDBase[User, UserCreate, UserUpdate]):
             .where(UserTenantRole.role_id == role_id)
         )
         result = await db.execute(stmt)
-        await db.commit()
+        if autocommit:
+            await db.commit()
         if result.rowcount == 0:
              logger.warning(f"Attempted to remove non-existent role assignment: user={user_id}, role={role_id}, tenant={tenant_id}")
         return result.rowcount

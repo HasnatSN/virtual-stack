@@ -124,6 +124,7 @@ class Settings(BaseSettings):
     TEST_USER_EMAIL: str = "admin@virtualstack.example"
     TEST_USER_PASSWORD: str = "testpassword123!"
     TEST_TENANT_SLUG: str = "test-tenant"
+    DEFAULT_TEST_TENANT_NAME: str = "Default Test Tenant"
 
     # Redis settings
     REDIS_URL: Optional[str] = None

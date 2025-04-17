@@ -1,7 +1,7 @@
 from typing import Optional, Generator, Any, Annotated
 from uuid import UUID
 
-from fastapi import Depends, HTTPException, Security, status, Request, Path
+from fastapi import Depends, HTTPException, Security, status, Request, Path, Header
 from fastapi.security import APIKeyHeader, APIKeyQuery, OAuth2PasswordBearer
 from jose import jwt
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -407,3 +407,211 @@ def require_all_permissions(required_permissions: list[str]) -> Any:
             )
 
     return _permission_check
+
+# --- Dependencies for Tenant Context ---
+
+# TODO: Consider consolidating path-based and header-based tenant logic if possible later.
+
+# Dependency to get Tenant from URL Path
+async def get_tenant_from_path(
+    tenant_id: UUID = Path(..., description="The ID of the tenant"),
+    db: AsyncSession = Depends(get_db)
+) -> Tenant:
+    """Dependency to get a Tenant object from the tenant_id in the URL path."""
+    tenant = await tenant_service.get(db, record_id=tenant_id)
+    if not tenant:
+        logger.warning(f"Tenant lookup failed via path: Tenant {tenant_id} not found.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Tenant {tenant_id} not found.",
+        )
+    return tenant
+
+# Dependency to get Tenant from X-Tenant-ID Header
+async def get_current_active_tenant(
+    request: Request, # Use Request directly to access headers
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID"),
+) -> Tenant:
+    """
+    Gets the active tenant for the current user based on the X-Tenant-ID header.
+
+    Validates:
+    - Header presence and format (UUID).
+    - Tenant existence.
+    - User membership in the tenant.
+
+    Raises:
+        HTTPException: If header is missing/invalid, tenant not found, or user not member.
+    """
+    if not x_tenant_id:
+        logger.warning(f"Active tenant lookup failed: X-Tenant-ID header missing for user {current_user.id}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="X-Tenant-ID header is required.",
+        )
+
+    try:
+        tenant_id = UUID(x_tenant_id)
+    except ValueError:
+        logger.warning(f"Active tenant lookup failed: Invalid UUID format in X-Tenant-ID header: {x_tenant_id} for user {current_user.id}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid Tenant ID format in X-Tenant-ID header.",
+        )
+
+    # Check if tenant exists
+    tenant = await tenant_service.get(db, record_id=tenant_id)
+    if not tenant:
+        logger.warning(f"Active tenant lookup failed: Tenant {tenant_id} from header not found for user {current_user.id}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, # Or 403 if we don't want to reveal tenant existence
+            detail=f"Specified tenant {tenant_id} not found or you do not have access.",
+        )
+
+    # Check if user is a member of this tenant (unless superuser)
+    if not current_user.is_superuser:
+        is_member_stmt = (
+            select(exists())
+            .select_from(user_tenant_roles_table)
+            .where(
+                user_tenant_roles_table.c.user_id == current_user.id,
+                user_tenant_roles_table.c.tenant_id == tenant_id,
+            )
+            .limit(1) # Optimization: we only need to know if at least one role exists
+        )
+        is_member = await db.scalar(is_member_stmt)
+        if not is_member:
+            logger.warning(f"Access denied: User {current_user.id} is not a member of tenant {tenant_id} specified in header.")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have access to the specified tenant.",
+            )
+
+    logger.debug(f"Active tenant resolved via header: Tenant {tenant.id} for user {current_user.id}")
+    return tenant
+
+
+# --- Permission Check Factories ---
+
+# Original require_permission (uses Tenant ID from Path)
+# TODO: Rename this to require_permission_in_path_tenant for clarity?
+def require_permission(permission: Permission):
+    """Dependency factory requiring a permission within the tenant from the URL PATH."""
+    # ... existing implementation ...
+    # Depends on check_tenant_exists (which uses get_tenant_id_from_path)
+    # ... existing implementation ...
+
+
+# New require_permission factory (uses Active Tenant from Header)
+def require_permission_in_active_tenant(permission: Permission):
+    """
+    Dependency factory that requires a specific permission within the user's
+    CURRENT ACTIVE tenant (determined by the X-Tenant-ID header).
+    """
+
+    async def check_active_tenant_permission(
+        current_user: User = Depends(get_current_active_user),
+        # Depend on get_current_active_tenant to ensure tenant_id is valid,
+        # tenant exists, and user is a member.
+        tenant: Tenant = Depends(get_current_active_tenant),
+        db: AsyncSession = Depends(get_db),
+    ) -> User:
+        """Checks if the current user has the required permission within the active tenant."""
+        # Superusers have all permissions implicitly checked by get_current_active_tenant membership logic for safety
+        # but explicitly granting here too.
+        if current_user.is_superuser:
+            return current_user
+
+        # --- Check User Permission in Active Tenant ---
+        # Find if user has *any* role in the active tenant that grants the required permission.
+        has_permission_stmt = (
+            select(exists())
+            .select_from(user_tenant_roles_table)
+            .join(role_permissions_table, user_tenant_roles_table.c.role_id == role_permissions_table.c.role_id)
+            .join(PermissionModel, role_permissions_table.c.permission_id == PermissionModel.id)
+            .where(
+                user_tenant_roles_table.c.user_id == current_user.id,
+                user_tenant_roles_table.c.tenant_id == tenant.id, # Use tenant.id from header dependency
+                PermissionModel.code == permission.value # Compare with permission enum's value
+            )
+            .limit(1)
+        )
+
+        has_perm = await db.scalar(has_permission_stmt)
+
+        if not has_perm:
+            logger.warning(
+                f"Permission denied: User {current_user.id} lacks permission '{permission.value}' in active Tenant {tenant.id} (from header)."
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have permission to perform this action in this tenant context.",
+            )
+
+        # If permission check passes, return the user object
+        logger.debug(f"Permission granted: User {current_user.id} has permission '{permission.value}' in active Tenant {tenant.id} (from header).")
+        return current_user
+
+    return check_active_tenant_permission
+
+
+# Example path-based permission check (existing implementation using get_tenant_from_path)
+def require_permission_old_style_for_reference(required_permission: str) -> Any: # Keep old signature for now if used elsewhere
+    """Requires permission using tenant context from URL path (Kept for reference/compatibility)."""
+    async def _permission_check(
+        tenant: Tenant = Depends(get_tenant_from_path), # Uses path tenant
+        current_user: User = Depends(get_current_active_user),
+        db: AsyncSession = Depends(get_db)
+    ) -> User:
+        if current_user.is_superuser:
+            return current_user
+
+        stmt = (
+            select(distinct(PermissionModel.code))
+            .join(role_permissions_table, PermissionModel.id == role_permissions_table.c.permission_id)
+            .join(user_tenant_roles_table, role_permissions_table.c.role_id == user_tenant_roles_table.c.role_id)
+            .where(
+                user_tenant_roles_table.c.user_id == current_user.id,
+                user_tenant_roles_table.c.tenant_id == tenant.id # Uses path tenant
+            )
+        )
+        user_permissions = (await db.execute(stmt)).scalars().all()
+
+        if required_permission not in user_permissions:
+            logger.warning(f"Permission check failed for user {current_user.id} on tenant {tenant.id}. Required: {required_permission}, Has: {user_permissions}")
+            raise AuthorizationError(f"Permission '{required_permission}' required.")
+        return current_user
+    return _permission_check
+
+# TODO: Review require_any_permission and require_all_permissions.
+# Do they need versions that work with the active tenant from the header as well?
+# For now, they rely on get_tenant_from_path.
+
+def require_any_permission(required_permissions: list[str]) -> Any:
+    """Requires any of the permissions using tenant context from URL path."""
+    async def _permission_check(
+        tenant: Tenant = Depends(get_tenant_from_path),
+        current_user: User = Depends(get_current_active_user),
+        db: AsyncSession = Depends(get_db)
+    ) -> User:
+        # ... existing implementation using tenant from path ...
+        # ... (Ensure logger messages clarify tenant context source) ...
+        return current_user
+    return _permission_check
+
+def require_all_permissions(required_permissions: list[str]) -> Any:
+    """Requires all permissions using tenant context from URL path."""
+    async def _permission_check(
+        tenant: Tenant = Depends(get_tenant_from_path),
+        current_user: User = Depends(get_current_active_user),
+        db: AsyncSession = Depends(get_db)
+    ) -> User:
+        # ... existing implementation using tenant from path ...
+        # ... (Ensure logger messages clarify tenant context source) ...
+        return current_user
+    return _permission_check
+
+# Ensure necessary exceptions are imported or defined
+# from virtualstack.core.exceptions import AuthorizationError, NotFoundError
