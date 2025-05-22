@@ -8,37 +8,39 @@ packages = [{include = "virtualstack", from = "src"}]
 
 [tool.poetry.dependencies]
 python = "^3.9"
-fastapi = "^0.110.0"
-uvicorn = {extras = ["standard"], version = "^0.27.1"}
-sqlalchemy = {extras = ["asyncpg"], version = "^2.0.27"}
-alembic = "^1.13.1"
-pydantic = "^2.6.3"
-pydantic-settings = "^2.2.1"
-python-dotenv = "^1.0.1"
-passlib = {extras = ["bcrypt"], version = "^1.7.4"}
-python-jose = {extras = ["cryptography"], version = "^3.3.0"}
-celery = "^5.3.6"
-redis = "^5.0.1"
-pyyaml = "^6.0.1"
-httpx = "^0.26.0"
-prometheus-fastapi-instrumentator = "^6.1.0"
-prometheus-client = "^0.20.0"
-sentry-sdk = {extras = ["fastapi"], version = "^1.40.6"}
-loguru = "^0.7.2"
-asyncpg = "^0.30.0"
-email-validator = "^2.2.0"
-python-multipart = "^0.0.20"
-greenlet = "^3.1.1"
+fastapi = "^0.110.0" # Kept from pyproject, compatible with >=0.110.0,<0.113.0
+uvicorn = {extras = ["standard"], version = ">=0.29.0,<0.31.0"} # Updated from reqs
+sqlalchemy = {extras = ["asyncio", "asyncpg"], version = ">=2.0.29,<2.1.0"} # Updated from reqs, merged extras
+alembic = "^1.13.1" # Kept from pyproject, compatible with >=1.13.1,<1.14.0
+pydantic = ">=2.6.4,<2.9.0" # Updated from reqs
+pydantic-settings = "^2.2.1" # Kept from pyproject, compatible with >=2.2.1,<2.4.0
+python-dotenv = "^1.0.1" # Kept from pyproject
+passlib = {extras = ["bcrypt"], version = "^1.7.4"} # Kept from pyproject, compatible with >=1.7.4,<1.8.0
+python-jose = {extras = ["cryptography"], version = "^3.3.0"} # Kept from pyproject, compatible with >=3.3.0,<3.4.0
+celery = "^5.3.6" # Kept from pyproject
+redis = {extras = ["hiredis"], version = ">=4.6.0,<6.0.0"} # Updated from reqs, specified version range for clarity
+pyyaml = "^6.0.1" # Kept from pyproject
+httpx = {extras = ["http2", "brotli"], version = ">=0.27.0,<0.28.0"} # Updated to match dev requirements
+prometheus-fastapi-instrumentator = "^6.1.0" # Kept from pyproject
+prometheus-client = "^0.20.0" # Kept from pyproject
+sentry-sdk = {extras = ["fastapi"], version = "^1.40.6"} # Kept from pyproject
+loguru = "^0.7.2" # Kept from pyproject
+asyncpg = "^0.30.0" # Kept from pyproject, compatible with >=0.29.0,<0.30.0
+email-validator = "^2.2.0" # Kept from pyproject, compatible with >=2.1.1,<2.3.0
+python-multipart = "^0.0.20" # Kept from pyproject (newer than reqs)
+greenlet = "^3.1.1" # Kept from pyproject
 
 [tool.poetry.group.dev.dependencies]
-pytest = "^8.0.2"
-pytest-asyncio = "^0.23.5"
-pytest-cov = "^4.1.0"
-black = "^24.2.0"
-isort = "^5.13.2"
-flake8 = "^7.0.0"
-mypy = "^1.8.0"
-httpx = "^0.26.0"
+pytest = ">=8.1.1,<8.4.0" # Updated from reqs-dev
+pytest-asyncio = ">=0.23.6,<0.27.0" # Updated from reqs-dev
+pytest-cov = ">=5.0.0,<6.0.0" # Updated from reqs-dev
+black = "^24.2.0" # Kept from pyproject
+isort = "^5.13.2" # Kept from pyproject
+flake8 = "^7.0.0" # Kept from pyproject
+mypy = "^1.8.0" # Kept from pyproject
+# httpx is now part of main dependencies with the version required by dev
+factory-boy = ">=3.2.0" # Added from reqs-dev, updated version constraint
+ruff = ">=0.4.2,<0.6.0" # Added from reqs-dev
 
 [build-system]
 requires = ["poetry-core"]
